@@ -4,7 +4,7 @@
   "version": "1.1.0",
   "description": "可互动像素风小屋，支持昼夜切换、门窗、种花、角色像素形象（从Roche角色列表导入或自定义上传）",
   "author": "Pixel Artist",
-  "entry": "https://raw.githubusercontent.com/yourname/pixel-house/main/pixel-house.js",
+  "entry": "https://raw.githubusercontent.com/heecys/pixelhome/refs/heads/main/pixel-house.js",
   "hash": "",
   "permissions": [
     "storage",
