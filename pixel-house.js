@@ -1,1198 +1,1562 @@
-window.RochePlugin.register({
-  id: "pixel-house",
-  name: "像素小屋",
-  version: "2.0.0",
-  apps: [
-    {
-      id: "pixel-house-home",
-      name: "像素小屋",
-      icon: "home",
-      iconImage: "",
-      async mount(container, roche) {
-        const GRID_W = 36
-        const GRID_H = 26
-        const PIXEL_SIZE = 16
-        const CHAR_BASE_X = 16
-        const CHAR_BASE_Y = 25
-        const DEFAULT_SPRITE_W = 8
-        const DEFAULT_SPRITE_H = 12
-
-        const WALL_PRESETS = [
-          { name: "暗夜海军", color: "#1a1a2e", accent: "#16213e" },
-          { name: "深灰条纹", color: "#2d3748", accent: "#374151" },
-          { name: "柔粉", color: "#f5e6e8", accent: "#e8d5d8" },
-          { name: "奶油白", color: "#faf8f5", accent: "#f0ebe3" },
-          { name: "墨绿", color: "#1e3832", accent: "#2a4a3e" }
-        ]
-
-        const FLOOR_PRESETS = [
-          { name: "浅木色", color: "#d4c5b2", accent: "#c4b5a2" },
-          { name: "深木色", color: "#5c4033", accent: "#4a3328" },
-          { name: "白瓷砖", color: "#e8e8e8", accent: "#d4d4d4" },
-          { name: "灰水泥", color: "#9ca3af", accent: "#8b939f" }
-        ]
-
-        const PALETTE = {
-          // 天花板
-          ceiling: "#1a1d23",
-          ceiling_line: "#2d3139",
-          // 踢脚线
-          baseboard: "#3d2e27",
-          baseboard_top: "#4d3e37",
-          // 窗户
-          window_frame: "#4a3728",
-          window_glass_day: "#7ec8e3",
-          window_glass_night: "#1a2a4a",
-          // 家具
-          desk_top: "#5c3d2e",
-          desk_leg: "#3d2a1e",
-          desk_drawer: "#4a3020",
-          monitor_screen: "#1a1a2e",
-          monitor_frame: "#2d2d2d",
-          monitor_stand: "#3d3d3d",
-          monitor_glow: "#4a7cff",
-          chair_seat: "#6b4c3b",
-          chair_leg: "#3d2a1e",
-          // 书架
-          shelf_board: "#5c4033",
-          shelf_side: "#4a3020",
-          // 书
-          book_red: "#c0392b",
-          book_blue: "#2980b9",
-          book_green: "#27ae60",
-          book_purple: "#8e44ad",
-          book_yellow: "#f1c40f",
-          book_orange: "#e67e22",
-          book_pink: "#e91e63",
-          book_white: "#ecf0f1",
-          // 公告板
-          cork: "#c8a96e",
-          cork_frame: "#8b6914",
-          // 地毯
-          rug_main: "#7c3aed",
-          rug_border: "#5b21b6",
-          rug_pattern: "#a78bfa",
-          // 垃圾桶
-          bin_color: "#374151",
-          bin_lid: "#4b5563",
-          // 落地灯
-          lamp_stand: "#374151",
-          lamp_shade: "#fef3c7",
-          lamp_glow: "#fde047",
-          // 盆栽
-          pot: "#d97706",
-          pot_soil: "#5c4033",
-          plant_green: "#15803d",
-          plant_light: "#22c55e",
-          // 猫
-          cat_orange: "#fb923c",
-          cat_white: "#f8fafc",
-          cat_black: "#1f2937",
-          // 挂钟
-          clock_frame: "#374151",
-          clock_face: "#f9fafb",
-          // 海报
-          poster_bg: "#f5f0e8",
-          poster_border: "#374151",
-          // 门
-          door_frame: "#5c4033",
-          door_panel: "#7c5c43",
-          door_knob: "#fbbf24",
-          // 插座
-          outlet: "#e5e7eb"
-        }
-
-        const EDITOR_PALETTE = [
-          null, "#000000", "#ffffff", "#6b7280", "#9ca3af", "#d1d5db",
-          "#8d5524", "#c68863", "#e8b796", "#f5a58a", "#fdbab4",
-          "#1f2937", "#422006", "#78350f", "#ca8a04", "#facc15", "#fde047",
-          "#dc2626", "#ef4444", "#f97316", "#fb923c", "#fdba74",
-          "#16a34a", "#22c55e", "#4ade80", "#86efac",
-          "#0891b2", "#06b6d4", "#22d3ee", "#67e8f9",
-          "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd",
-          "#7c3aed", "#8b5cf6", "#a78bfa", "#c4b5fd",
-          "#db2777", "#ec4899", "#f472b6", "#f9a8d4",
-          "#1e3a5f", "#0f172a", "#fde68a", "#fcd34d"
-        ]
-
-        // ==================== 状态 ====================
-        let state = {
-          wallPreset: 0,
-          floorPreset: 0,
-          isNight: false,
-          lightOn: true,
-          catX: 2,
-          catY: 23,
-          catDir: 1,
-          catColor: "orange",
-          characterSprite: null,
-          characterName: "",
-          stars: []
-        }
-
-        try {
-          const saved = await roche.storage.get("pixelHouseState")
-          if (saved) state = { ...state, ...saved }
-        } catch (e) {}
-
-        for (let i = 0; i < 8; i++) {
-          state.stars.push({
-            x: 14 + Math.floor(Math.random() * 6),
-            y: 3 + Math.floor(Math.random() * 6),
-            blink: Math.random() > 0.5
-          })
-        }
-
-        let charBob = 0
-        let charJumping = false
-        let jumpFrame = 0
-        let workingSprite = null
-        let selectedColor = "#1f2937"
-        let editorMode = "paint"
-
-        // ==================== 样式 ====================
-        const styleEl = document.createElement("style")
-        styleEl.textContent = `
-          .roche-plugin-pixel-house {
-            width: 100%; height: 100%;
-            background: #1a1d23;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            overflow: auto;
-            font-family: "Courier New", monospace;
-            position: relative;
-          }
-          .roche-plugin-pixel-house .pixel-canvas {
-            display: grid;
-            grid-template-columns: repeat(${GRID_W}, ${PIXEL_SIZE}px);
-            grid-template-rows: repeat(${GRID_H}, ${PIXEL_SIZE}px);
-            gap: 0; border: 4px solid #2d3139;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-            cursor: pointer; user-select: none;
-          }
-          .roche-plugin-pixel-house .pixel {
-            width: ${PIXEL_SIZE}px; height: ${PIXEL_SIZE}px;
-            transition: background-color 0.25s ease;
-          }
-          .roche-plugin-pixel-house .pixel:hover { filter: brightness(1.15); }
-          .roche-plugin-pixel-house .controls {
-            margin-top: 14px; display: flex; gap: 10px;
-            align-items: center; flex-wrap: wrap; justify-content: center;
-          }
-          .roche-plugin-pixel-house .btn {
-            padding: 7px 14px; border: 2px solid #4a5568;
-            background: #2d3748; color: #e2e8f0;
-            font-family: inherit; font-size: 13px; font-weight: bold;
-            cursor: pointer; border-radius: 4px;
-            transition: all 0.15s ease;
-          }
-          .roche-plugin-pixel-house .btn:hover {
-            background: #4a5568; border-color: #718096;
-          }
-          .roche-plugin-pixel-house .btn:active {
-            background: #1a202c;
-          }
-          .roche-plugin-pixel-house .btn.accent {
-            background: #7c3aed; border-color: #6d28d9;
-          }
-          .roche-plugin-pixel-house .btn.accent:hover { background: #8b5cf6; }
-          .roche-plugin-pixel-house .hint {
-            margin-top: 10px; color: #6b7280; font-size: 11px;
-            text-align: center; line-height: 1.5;
-          }
-          .roche-plugin-pixel-house .title {
-            font-size: 22px; font-weight: bold; color: #e2e8f0;
-            margin-bottom: 10px;
-          }
-          .roche-plugin-pixel-house .close-btn {
-            position: absolute; top: 10px; right: 10px;
-            width: 34px; height: 34px;
-            display: flex; align-items: center; justify-content: center;
-            border: 2px solid #4a5568; background: #2d3748;
-            cursor: pointer; font-size: 16px; font-weight: bold;
-            color: #e2e8f0; border-radius: 4px; z-index: 10;
-          }
-          .roche-plugin-pixel-house .close-btn:hover { background: #4a5568; }
-
-          .roche-plugin-pixel-house .char-overlay {
-            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.7); display: none;
-            align-items: center; justify-content: center;
-            z-index: 100; padding: 16px;
-          }
-          .roche-plugin-pixel-house .char-overlay.active { display: flex; }
-          .roche-plugin-pixel-house .char-modal {
-            background: #1e2130; border: 2px solid #4a5568;
-            border-radius: 8px;
-            max-width: 560px; width: 100%; max-height: 85vh;
-            overflow-y: auto; padding: 20px; color: #e2e8f0;
-          }
-          .roche-plugin-pixel-house .char-modal-header {
-            display: flex; justify-content: space-between;
-            align-items: center; margin-bottom: 16px;
-          }
-          .roche-plugin-pixel-house .char-modal-title {
-            font-size: 18px; font-weight: bold;
-          }
-          .roche-plugin-pixel-house .char-modal-close {
-            width: 32px; height: 32px;
-            border: 2px solid #4a5568; background: #2d3748;
-            cursor: pointer; font-size: 16px; font-weight: bold; color: #e2e8f0;
-            border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .char-tabs {
-            display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
-          }
-          .roche-plugin-pixel-house .char-tab {
-            padding: 6px 14px; border: 2px solid #4a5568;
-            background: #2d3748; cursor: pointer;
-            font-family: inherit; font-size: 13px; font-weight: bold; color: #e2e8f0;
-            border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .char-tab.active {
-            background: #7c3aed; border-color: #6d28d9;
-          }
-          .roche-plugin-pixel-house .char-tab-content { display: none; }
-          .roche-plugin-pixel-house .char-tab-content.active { display: block; }
-          .roche-plugin-pixel-house .char-list {
-            display: flex; flex-direction: column; gap: 8px;
-            max-height: 320px; overflow-y: auto;
-          }
-          .roche-plugin-pixel-house .char-item {
-            display: flex; align-items: center; gap: 12px;
-            padding: 8px; border: 2px solid #374151;
-            background: #2d3748; cursor: pointer; border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .char-item:hover {
-            border-color: #7c3aed; background: #374151;
-          }
-          .roche-plugin-pixel-house .char-item-avatar {
-            width: 40px; height: 40px; border-radius: 4px;
-            object-fit: cover; background: #1a1d23;
-          }
-          .roche-plugin-pixel-house .char-item-placeholder {
-            width: 40px; height: 40px; border-radius: 4px;
-            background: #1a1d23; display: flex; align-items: center;
-            justify-content: center; font-size: 18px; font-weight: bold; color: #6b7280;
-          }
-          .roche-plugin-pixel-house .char-item-name { font-size: 14px; font-weight: bold; }
-          .roche-plugin-pixel-house .char-item-handle { font-size: 12px; color: #9ca3af; }
-          .roche-plugin-pixel-house .upload-area {
-            display: flex; flex-direction: column; gap: 12px;
-          }
-          .roche-plugin-pixel-house .upload-btn-wrapper {
-            position: relative; overflow: hidden; display: inline-block;
-          }
-          .roche-plugin-pixel-house .upload-btn {
-            padding: 8px 16px; border: 2px solid #4a5568;
-            background: #2d3748; cursor: pointer;
-            font-family: inherit; font-size: 14px; font-weight: bold; color: #e2e8f0;
-            border-radius: 4px; display: inline-block;
-          }
-          .roche-plugin-pixel-house .upload-btn:hover { background: #4a5568; }
-          .roche-plugin-pixel-house .upload-btn-wrapper input[type=file] {
-            position: absolute; top: 0; left: 0; opacity: 0;
-            width: 100%; height: 100%; cursor: pointer;
-          }
-          .roche-plugin-pixel-house .size-controls {
-            display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
-          }
-          .roche-plugin-pixel-house .size-control {
-            display: flex; flex-direction: column; gap: 4px;
-          }
-          .roche-plugin-pixel-house .size-control label { font-size: 12px; color: #9ca3af; }
-          .roche-plugin-pixel-house .size-control input[type=range] { width: 120px; }
-          .roche-plugin-pixel-house .size-value { font-size: 14px; font-weight: bold; }
-          .roche-plugin-pixel-house .upload-preview {
-            margin-top: 8px; padding: 12px; border: 2px dashed #4a5568;
-            background: #1a1d23; text-align: center; min-height: 60px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 13px; color: #6b7280; border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .editor-section {
-            display: flex; flex-direction: column; gap: 12px;
-          }
-          .roche-plugin-pixel-house .editor-controls {
-            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-          }
-          .roche-plugin-pixel-house .editor-size-input {
-            width: 50px; padding: 4px; border: 2px solid #4a5568;
-            font-family: inherit; font-size: 13px; background: #1a1d23; color: #e2e8f0;
-            border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .editor-grid-wrapper {
-            overflow: auto; max-width: 100%; padding: 8px;
-            background: #111; border: 2px solid #4a5568; border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .editor-grid { display: grid; gap: 0; }
-          .roche-plugin-pixel-house .editor-cell {
-            width: 22px; height: 22px; cursor: pointer;
-            box-sizing: border-box; border: 1px solid #333;
-          }
-          .roche-plugin-pixel-house .editor-cell.transparent {
-            background-image:
-              linear-gradient(45deg, #333 25%, transparent 25%, transparent 75%, #333 75%),
-              linear-gradient(45deg, #333 25%, transparent 25%, transparent 75%, #333 75%);
-            background-size: 8px 8px;
-            background-position: 0 0, 4px 4px;
-            background-color: #1a1a1a;
-          }
-          .roche-plugin-pixel-house .editor-palette {
-            display: flex; flex-wrap: wrap; gap: 4px;
-            padding: 8px; background: #111; border: 2px solid #4a5568; border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .palette-swatch {
-            width: 24px; height: 24px; cursor: pointer;
-            border: 2px solid #4a5568; box-sizing: border-box; border-radius: 2px;
-          }
-          .roche-plugin-pixel-house .palette-swatch.selected {
-            border: 3px solid #f59e0b; box-shadow: 0 0 0 2px #1a1d23;
-          }
-          .roche-plugin-pixel-house .palette-swatch.eraser {
-            background-image:
-              linear-gradient(45deg, #333 25%, transparent 25%, transparent 75%, #333 75%),
-              linear-gradient(45deg, #333 25%, transparent 25%, transparent 75%, #333 75%);
-            background-size: 8px 8px; background-position: 0 0, 4px 4px;
-            background-color: #1a1a1a;
-          }
-          .roche-plugin-pixel-house .editor-tools { display: flex; gap: 8px; }
-          .roche-plugin-pixel-house .tool-btn {
-            padding: 4px 12px; border: 2px solid #4a5568;
-            background: #2d3748; cursor: pointer;
-            font-family: inherit; font-size: 12px; font-weight: bold; color: #e2e8f0;
-            border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .tool-btn.active { background: #7c3aed; border-color: #6d28d9; }
-          .roche-plugin-pixel-house .char-footer {
-            margin-top: 16px; display: flex; gap: 8px;
-            align-items: center; flex-wrap: wrap;
-          }
-          .roche-plugin-pixel-house .char-name-input {
-            flex: 1; min-width: 120px; padding: 6px 10px;
-            border: 2px solid #4a5568; font-family: inherit; font-size: 14px;
-            background: #1a1d23; color: #e2e8f0; border-radius: 4px;
-          }
-          .roche-plugin-pixel-house .char-loading {
-            text-align: center; padding: 20px; color: #6b7280; font-size: 14px;
-          }
-          .roche-plugin-pixel-house .char-error {
-            text-align: center; padding: 20px; color: #ef4444; font-size: 14px;
-          }
-          .roche-plugin-pixel-house .char-empty {
-            text-align: center; padding: 20px; color: #6b7280; font-size: 14px;
-          }
-          .roche-plugin-pixel-house .preset-row {
-            display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;
-          }
-          .roche-plugin-pixel-house .preset-swatch {
-            width: 40px; height: 40px; cursor: pointer;
-            border: 2px solid #4a5568; border-radius: 4px;
-            position: relative; overflow: hidden;
-          }
-          .roche-plugin-pixel-house .preset-swatch.active {
-            border-color: #7c3aed; box-shadow: 0 0 0 2px #7c3aed;
-          }
-          .roche-plugin-pixel-house .preset-label {
-            font-size: 10px; color: #9ca3af; text-align: center; margin-top: 2px;
-          }
-          @keyframes twinkle { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
-          .roche-plugin-pixel-house .star-anim { animation: twinkle 2s ease-in-out infinite; }
-          @keyframes cat-walk { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
-          .roche-plugin-pixel-house .cat-anim { animation: cat-walk 0.3s ease-in-out infinite; }
-          @keyframes monitor-flicker { 0%,100% { opacity: 1; } 95% { opacity: 1; } 97% { opacity: 0.5; } }
-          .roche-plugin-pixel-house .monitor-anim { animation: monitor-flicker 4s ease-in-out infinite; }
-        `
-        document.head.appendChild(styleEl)
-
-        // ==================== DOM 结构 ====================
-        const wallPreset = WALL_PRESETS[state.wallPreset]
-        const floorPreset = FLOOR_PRESETS[state.floorPreset]
-
-        const root = document.createElement("div")
-        root.className = "roche-plugin-pixel-house"
-
-        const closeBtn = document.createElement("button")
-        closeBtn.className = "close-btn"
-        closeBtn.textContent = "×"
-        closeBtn.onclick = () => roche.ui.closeApp()
-        root.appendChild(closeBtn)
-
-        const title = document.createElement("div")
-        title.className = "title"
-        title.textContent = "像素小屋"
-        root.appendChild(title)
-
-        const canvas = document.createElement("div")
-        canvas.className = "pixel-canvas"
-        root.appendChild(canvas)
-
-        // 控制按钮
-        const controls = document.createElement("div")
-        controls.className = "controls"
-
-        const lightBtn = document.createElement("button")
-        lightBtn.className = "btn accent"
-        lightBtn.textContent = state.lightOn ? "💡 关灯" : "💡 开灯"
-        lightBtn.onclick = toggleLight
-        controls.appendChild(lightBtn)
-
-        const wallBtn = document.createElement("button")
-        wallBtn.className = "btn"
-        wallBtn.textContent = "🖼️ 换墙纸"
-        wallBtn.onclick = cycleWallpaper
-        controls.appendChild(wallBtn)
-
-        const floorBtn = document.createElement("button")
-        floorBtn.className = "btn"
-        floorBtn.textContent = "🪵 换地板"
-        floorBtn.onclick = cycleFloor
-        controls.appendChild(floorBtn)
-
-        const charBtn = document.createElement("button")
-        charBtn.className = "btn"
-        charBtn.textContent = state.characterSprite ? "👤 编辑角色" : "👤 添加角色"
-        charBtn.onclick = openCharPanel
-        controls.appendChild(charBtn)
-
-        const catBtn = document.createElement("button")
-        catBtn.className = "btn"
-        catBtn.textContent = "🐱 换只猫咪"
-        catBtn.onclick = changeCat
-        controls.appendChild(catBtn)
-
-        root.appendChild(controls)
-
-        const hint = document.createElement("div")
-        hint.className = "hint"
-        hint.innerHTML = "点击窗户切换昼夜 · 点击角色打招呼 · 点击灯开关灯 · 点击猫咪换方向"
-        root.appendChild(hint)
-
-        // ==================== 角色弹窗（同 v1.1 结构） ====================
-        const charOverlay = document.createElement("div")
-        charOverlay.className = "char-overlay"
-        const charModal = document.createElement("div")
-        charModal.className = "char-modal"
-        const charHeader = document.createElement("div")
-        charHeader.className = "char-modal-header"
-        const charModalTitle = document.createElement("div")
-        charModalTitle.className = "char-modal-title"
-        charModalTitle.textContent = "角色像素形象"
-        charHeader.appendChild(charModalTitle)
-        const charModalClose = document.createElement("button")
-        charModalClose.className = "char-modal-close"
-        charModalClose.textContent = "×"
-        charModalClose.onclick = closeCharPanel
-        charHeader.appendChild(charModalClose)
-        charModal.appendChild(charHeader)
-        const charTabs = document.createElement("div")
-        charTabs.className = "char-tabs"
-        const tabChars = document.createElement("button")
-        tabChars.className = "char-tab active"
-        tabChars.textContent = "角色列表"
-        tabChars.onclick = () => switchTab("chars")
-        charTabs.appendChild(tabChars)
-        const tabUpload = document.createElement("button")
-        tabUpload.className = "char-tab"
-        tabUpload.textContent = "上传图片"
-        tabUpload.onclick = () => switchTab("upload")
-        charTabs.appendChild(tabUpload)
-        const tabDraw = document.createElement("button")
-        tabDraw.className = "char-tab"
-        tabDraw.textContent = "手绘编辑"
-        tabDraw.onclick = () => switchTab("draw")
-        charTabs.appendChild(tabDraw)
-        charModal.appendChild(charTabs)
-        const contentChars = document.createElement("div")
-        contentChars.className = "char-tab-content active"
-        contentChars.innerHTML = '<div class="char-loading">加载中...</div>'
-        charModal.appendChild(contentChars)
-        const contentUpload = document.createElement("div")
-        contentUpload.className = "char-tab-content"
-        const uploadArea = document.createElement("div")
-        uploadArea.className = "upload-area"
-        const uploadBtnWrapper = document.createElement("div")
-        uploadBtnWrapper.className = "upload-btn-wrapper"
-        const uploadBtnLabel = document.createElement("div")
-        uploadBtnLabel.className = "upload-btn"
-        uploadBtnLabel.textContent = "📁 选择图片"
-        const fileInput = document.createElement("input")
-        fileInput.type = "file"
-        fileInput.accept = "image/*"
-        fileInput.onchange = handleFileUpload
-        uploadBtnWrapper.appendChild(uploadBtnLabel)
-        uploadBtnWrapper.appendChild(fileInput)
-        uploadArea.appendChild(uploadBtnWrapper)
-        const sizeControls = document.createElement("div")
-        sizeControls.className = "size-controls"
-        const widthControl = document.createElement("div")
-        widthControl.className = "size-control"
-        widthControl.innerHTML = "<label>像素宽度</label>"
-        const widthSlider = document.createElement("input")
-        widthSlider.type = "range"; widthSlider.min = "4"; widthSlider.max = "16"; widthSlider.value = String(DEFAULT_SPRITE_W)
-        const widthValue = document.createElement("div")
-        widthValue.className = "size-value"; widthValue.textContent = String(DEFAULT_SPRITE_W)
-        widthSlider.oninput = () => widthValue.textContent = widthSlider.value
-        widthControl.appendChild(widthSlider); widthControl.appendChild(widthValue)
-        sizeControls.appendChild(widthControl)
-        const heightControl = document.createElement("div")
-        heightControl.className = "size-control"
-        heightControl.innerHTML = "<label>像素高度</label>"
-        const heightSlider = document.createElement("input")
-        heightSlider.type = "range"; heightSlider.min = "6"; heightSlider.max = "20"; heightSlider.value = String(DEFAULT_SPRITE_H)
-        const heightValue = document.createElement("div")
-        heightValue.className = "size-value"; heightValue.textContent = String(DEFAULT_SPRITE_H)
-        heightSlider.oninput = () => heightValue.textContent = heightSlider.value
-        heightControl.appendChild(heightSlider); heightControl.appendChild(heightValue)
-        sizeControls.appendChild(heightControl)
-        uploadArea.appendChild(sizeControls)
-        const uploadPreview = document.createElement("div")
-        uploadPreview.className = "upload-preview"
-        uploadPreview.textContent = "选择图片后自动像素化，可在「手绘编辑」中微调"
-        uploadArea.appendChild(uploadPreview)
-        contentUpload.appendChild(uploadArea)
-        charModal.appendChild(contentUpload)
-        const contentDraw = document.createElement("div")
-        contentDraw.className = "char-tab-content"
-        const editorSection = document.createElement("div")
-        editorSection.className = "editor-section"
-        const editorControlsEl = document.createElement("div")
-        editorControlsEl.className = "editor-controls"
-        editorControlsEl.innerHTML = "尺寸: "
-        const editorWInput = document.createElement("input")
-        editorWInput.type = "number"; editorWInput.className = "editor-size-input"; editorWInput.value = String(DEFAULT_SPRITE_W); editorWInput.min = "4"; editorWInput.max = "16"
-        editorControlsEl.appendChild(editorWInput)
-        editorControlsEl.appendChild(document.createTextNode(" × "))
-        const editorHInput = document.createElement("input")
-        editorHInput.type = "number"; editorHInput.className = "editor-size-input"; editorHInput.value = String(DEFAULT_SPRITE_H); editorHInput.min = "6"; editorHInput.max = "20"
-        editorControlsEl.appendChild(editorHInput)
-        const newSpriteBtn = document.createElement("button")
-        newSpriteBtn.className = "btn"; newSpriteBtn.textContent = "新建"; newSpriteBtn.style.fontSize = "12px"; newSpriteBtn.style.padding = "4px 10px"
-        newSpriteBtn.onclick = () => {
-          const w = Math.max(4, Math.min(16, parseInt(editorWInput.value) || DEFAULT_SPRITE_W))
-          const h = Math.max(6, Math.min(20, parseInt(editorHInput.value) || DEFAULT_SPRITE_H))
-          workingSprite = createBlankSprite(w, h); buildEditorGrid()
-        }
-        editorControlsEl.appendChild(newSpriteBtn)
-        const clearBtn2 = document.createElement("button")
-        clearBtn2.className = "btn"; clearBtn2.textContent = "清空"; clearBtn2.style.fontSize = "12px"; clearBtn2.style.padding = "4px 10px"
-        clearBtn2.onclick = () => {
-          if (!workingSprite) return
-          for (let y = 0; y < workingSprite.height; y++)
-            for (let x = 0; x < workingSprite.width; x++)
-              workingSprite.pixels[y][x] = null
-          buildEditorGrid()
-        }
-        editorControlsEl.appendChild(clearBtn2)
-        editorSection.appendChild(editorControlsEl)
-        const editorTools = document.createElement("div")
-        editorTools.className = "editor-tools"
-        const paintToolBtn = document.createElement("button")
-        paintToolBtn.className = "tool-btn active"; paintToolBtn.textContent = "✏️ 画笔"
-        paintToolBtn.onclick = () => { editorMode = "paint"; paintToolBtn.classList.add("active"); eraseToolBtn.classList.remove("active") }
-        editorTools.appendChild(paintToolBtn)
-        const eraseToolBtn = document.createElement("button")
-        eraseToolBtn.className = "tool-btn"; eraseToolBtn.textContent = "🧹 橡皮"
-        eraseToolBtn.onclick = () => { editorMode = "erase"; eraseToolBtn.classList.add("active"); paintToolBtn.classList.remove("active") }
-        editorTools.appendChild(eraseToolBtn)
-        editorSection.appendChild(editorTools)
-        const editorGridWrapper = document.createElement("div")
-        editorGridWrapper.className = "editor-grid-wrapper"
-        const editorGrid = document.createElement("div")
-        editorGrid.className = "editor-grid"
-        editorGridWrapper.appendChild(editorGrid)
-        editorSection.appendChild(editorGridWrapper)
-        const editorPalette = document.createElement("div")
-        editorPalette.className = "editor-palette"
-        EDITOR_PALETTE.forEach((color, idx) => {
-          const swatch = document.createElement("div")
-          swatch.className = "palette-swatch"
-          if (color === null) { swatch.classList.add("eraser"); swatch.title = "透明/橡皮" }
-          else { swatch.style.backgroundColor = color; swatch.title = color }
-          swatch.onclick = () => {
-            selectedColor = color; editorMode = color === null ? "erase" : "paint"
-            document.querySelectorAll(".roche-plugin-pixel-house .palette-swatch").forEach(s => s.classList.remove("selected"))
-            swatch.classList.add("selected")
-            if (color === null) { eraseToolBtn.classList.add("active"); paintToolBtn.classList.remove("active") }
-            else { paintToolBtn.classList.add("active"); eraseToolBtn.classList.remove("active") }
-          }
-          if (color === "#1f2937") swatch.classList.add("selected")
-          editorPalette.appendChild(swatch)
-        })
-        editorSection.appendChild(editorPalette)
-        contentDraw.appendChild(editorSection)
-        charModal.appendChild(contentDraw)
-        const charFooter = document.createElement("div")
-        charFooter.className = "char-footer"
-        const charNameInput = document.createElement("input")
-        charNameInput.type = "text"; charNameInput.className = "char-name-input"; charNameInput.placeholder = "角色名称..."; charNameInput.value = state.characterName || ""
-        charFooter.appendChild(charNameInput)
-        if (state.characterSprite) {
-          const removeCharBtn = document.createElement("button")
-          removeCharBtn.className = "btn"; removeCharBtn.textContent = "🗑️ 移除"; removeCharBtn.style.fontSize = "12px"; removeCharBtn.style.padding = "6px 12px"
-          removeCharBtn.onclick = removeCharacter
-          charFooter.appendChild(removeCharBtn)
-        }
-        const saveCharBtn = document.createElement("button")
-        saveCharBtn.className = "btn accent"; saveCharBtn.textContent = "💾 保存"
-        saveCharBtn.onclick = saveCharacter
-        charFooter.appendChild(saveCharBtn)
-        const cancelCharBtn = document.createElement("button")
-        cancelCharBtn.className = "btn"; cancelCharBtn.textContent = "取消"
-        cancelCharBtn.onclick = closeCharPanel
-        charFooter.appendChild(cancelCharBtn)
-        charModal.appendChild(charFooter)
-        charOverlay.appendChild(charModal)
-        root.appendChild(charOverlay)
-        container.appendChild(root)
-
-        // ==================== 像素画布 ====================
-        const pixels = []
-        for (let y = 0; y < GRID_H; y++) {
-          pixels[y] = []
-          for (let x = 0; x < GRID_W; x++) {
-            const pixel = document.createElement("div")
-            pixel.className = "pixel"
-            pixel.dataset.x = x; pixel.dataset.y = y
-            pixel.onclick = () => handlePixelClick(x, y)
-            canvas.appendChild(pixel)
-            pixels[y][x] = pixel
-          }
-        }
-
-        // ==================== 场景绘制 ====================
-        function setPixel(x, y, color) {
-          if (x >= 0 && x < GRID_W && y >= 0 && y < GRID_H) {
-            pixels[y][x].style.backgroundColor = color
-          }
-        }
-
-        function drawRect(x, y, w, h, color) {
-          for (let dy = 0; dy < h; dy++)
-            for (let dx = 0; dx < w; dx++)
-              setPixel(x + dx, y + dy, color)
-        }
-
-        function drawScene() {
-          for (let y = 0; y < GRID_H; y++)
-            for (let x = 0; x < GRID_W; x++) {
-              pixels[y][x].style.backgroundColor = "transparent"
-              pixels[y][x].className = "pixel"
-            }
-
-          const wp = WALL_PRESETS[state.wallPreset]
-          const fp = FLOOR_PRESETS[state.floorPreset]
-
-          // 天花板
-          drawRect(0, 0, GRID_W, 1, PALETTE.ceiling)
-          drawRect(0, 1, GRID_W, 1, PALETTE.ceiling_line)
-
-          // 墙壁
-          for (let y = 2; y < 15; y++) {
-            for (let x = 0; x < GRID_W; x++) {
-              setPixel(x, y, (x + y) % 3 === 0 ? wp.accent : wp.color)
-            }
-          }
-
-          // 踢脚线
-          drawRect(0, 15, GRID_W, 1, PALETTE.baseboard_top)
-          drawRect(0, 16, GRID_W, 1, PALETTE.baseboard)
-
-          // 地板
-          for (let y = 17; y < GRID_H; y++) {
-            for (let x = 0; x < GRID_W; x++) {
-              setPixel(x, y, (x + y) % 2 === 0 ? fp.color : fp.accent)
-            }
-          }
-
-          // 窗户
-          drawWindow(13, 3, 10, 8)
-
-          // 公告板
-          drawCorkBoard(2, 3, 9, 6)
-
-          // 海报
-          drawPoster(30, 2, 5, 7)
-
-          // 门
-          drawDoor(0, 8, 4, 8)
-
-          // 书桌 + 电脑
-          drawDesk(4, 17)
-
-          // 书架
-          drawBookshelf(28, 13)
-
-          // 地毯
-          drawRug(13, 21, 10, 4)
-
-          // 落地灯
-          drawFloorLamp(33, 12)
-
-          // 垃圾桶
-          drawTrashBin(1, 21)
-
-          // 盆栽
-          drawPlant(2, 15)
-
-          // 角色
-          drawCharacter()
-
-          // 猫咪
-          drawCat(state.catX, state.catY)
-        }
-
-        // ==================== 家具绘制 ====================
-        function drawWindow(wx, wy, ww, wh) {
-          // 窗框
-          drawRect(wx - 1, wy - 1, ww + 2, 1, PALETTE.window_frame)
-          drawRect(wx - 1, wy + wh, ww + 2, 1, PALETTE.window_frame)
-          drawRect(wx - 1, wy, 1, wh, PALETTE.window_frame)
-          drawRect(wx + ww, wy, 1, wh, PALETTE.window_frame)
-
-          // 玻璃
-          const glass = state.isNight ? PALETTE.window_glass_night : PALETTE.window_glass_day
-          drawRect(wx, wy, ww, wh, glass)
-
-          // 窗格
-          drawRect(wx + Math.floor(ww / 2), wy, 1, wh, PALETTE.window_frame)
-          drawRect(wx, wy + Math.floor(wh / 2), ww, 1, PALETTE.window_frame)
-
-          // 夜间星星
-          if (state.isNight) {
-            state.stars.forEach((star, i) => {
-              if (star.x >= wx && star.x < wx + ww && star.y >= wy && star.y < wy + wh) {
-                setPixel(star.x, star.y, "#fef3c7")
-                if (star.blink) {
-                  pixels[star.y][star.x].classList.add("star-anim")
-                  pixels[star.y][star.x].style.animationDelay = `${i * 0.3}s`
-                }
-              }
-            })
-          }
-
-          // 窗台
-          drawRect(wx - 1, wy + wh + 1, ww + 2, 1, PALETTE.window_frame)
-        }
-
-        function drawCorkBoard(cx, cy, cw, ch) {
-          // 边框
-          drawRect(cx - 1, cy - 1, cw + 2, ch + 2, PALETTE.cork_frame)
-          // 软木板
-          drawRect(cx, cy, cw, ch, PALETTE.cork)
-
-          // 便利贴 - 粉色
-          drawRect(cx + 1, cy + 1, 3, 2, "#f9a8d4")
-          // 便利贴 - 黄色
-          drawRect(cx + 5, cy + 1, 3, 2, "#fde047")
-          // 照片
-          drawRect(cx + 1, cy + 4, 4, 2, "#e5e7eb")
-          setPixel(cx + 2, cy + 4, "#f8fafc")
-          setPixel(cx + 3, cy + 4, "#f8fafc")
-          setPixel(cx + 2, cy + 5, "#d1d5db")
-          setPixel(cx + 3, cy + 5, "#d1d5db")
-          // 图钉
-          setPixel(cx + 2, cy, "#ef4444")
-          setPixel(cx + 6, cy, "#3b82f6")
-          setPixel(cx + 3, cy + 3, "#f59e0b")
-        }
-
-        function drawPoster(px, py, pw, ph) {
-          drawRect(px - 1, py - 1, pw + 2, 1, PALETTE.poster_border)
-          drawRect(px - 1, py + ph, pw + 2, 1, PALETTE.poster_border)
-          drawRect(px - 1, py, 1, ph, PALETTE.poster_border)
-          drawRect(px + pw, py, 1, ph, PALETTE.poster_border)
-          drawRect(px, py, pw, ph, PALETTE.poster_bg)
-          // 海报内容
-          drawRect(px + 1, py + 1, pw - 2, 2, "#7c3aed")
-          drawRect(px + 1, py + 3, pw - 2, 1, "#a78bfa")
-          drawRect(px + 1, py + 4, pw - 2, 1, "#c4b5fd")
-          setPixel(px + 2, py + 5, "#e5e7eb")
-          setPixel(px + 3, py + 5, "#e5e7eb")
-        }
-
-        function drawDoor(dx, dy, dw, dh) {
-          drawRect(dx, dy, dw, dh, PALETTE.door_panel)
-          drawRect(dx + 1, dy + 1, 2, 3, PALETTE.door_frame)
-          setPixel(dx + 2, dy + 5, PALETTE.door_knob)
-          // 门框
-          drawRect(dx, dy - 1, dw, 1, PALETTE.door_frame)
-          drawRect(dx + dw, dy, 1, dh, PALETTE.door_frame)
-        }
-
-        function drawDesk(dx, dy) {
-          // 桌腿
-          drawRect(dx, dy + 3, 1, 4, PALETTE.desk_leg)
-          drawRect(dx + 6, dy + 3, 1, 4, PALETTE.desk_leg)
-          // 桌面
-          drawRect(dx, dy + 2, 7, 1, PALETTE.desk_top)
-          drawRect(dx, dy + 3, 7, 1, PALETTE.desk_top)
-          // 抽屉
-          drawRect(dx + 1, dy + 3, 3, 1, PALETTE.desk_drawer)
-          setPixel(dx + 2, dy + 3, "#fbbf24")
-
-          // 显示器底座
-          drawRect(dx + 2, dy + 1, 4, 1, PALETTE.monitor_stand)
-          drawRect(dx + 3, dy, 2, 1, PALETTE.monitor_stand)
-          // 显示器
-          drawRect(dx + 1, dy - 5, 5, 5, PALETTE.monitor_frame)
-          drawRect(dx + 2, dy - 4, 3, 3, PALETTE.monitor_screen)
-          // 屏幕光
-          if (state.lightOn && !state.isNight) {
-            setPixel(dx + 3, dy - 3, PALETTE.monitor_glow)
-            setPixel(dx + 3, dy - 2, PALETTE.monitor_glow)
-          }
-
-          // 椅子
-          drawRect(dx + 1, dy + 7, 5, 2, PALETTE.chair_seat)
-          drawRect(dx + 1, dy + 9, 1, 1, PALETTE.chair_leg)
-          drawRect(dx + 5, dy + 9, 1, 1, PALETTE.chair_leg)
-          drawRect(dx + 2, dy + 6, 3, 1, PALETTE.chair_seat)
-        }
-
-        function drawBookshelf(sx, sy) {
-          // 侧板
-          drawRect(sx, sy, 1, 11, PALETTE.shelf_side)
-          drawRect(sx + 3, sy, 1, 11, PALETTE.shelf_side)
-          // 隔板
-          drawRect(sx, sy, 4, 1, PALETTE.shelf_board)
-          drawRect(sx, sy + 4, 4, 1, PALETTE.shelf_board)
-          drawRect(sx, sy + 7, 4, 1, PALETTE.shelf_board)
-          drawRect(sx, sy + 10, 4, 1, PALETTE.shelf_board)
-
-          // 书
-          const books = [
-            [sx + 1, sy + 1], [sx + 2, sy + 1], [sx + 1, sy + 2], [sx + 2, sy + 2],
-            [sx + 1, sy + 5], [sx + 2, sy + 5], [sx + 1, sy + 6], [sx + 2, sy + 6],
-            [sx + 1, sy + 8], [sx + 2, sy + 8], [sx + 1, sy + 9], [sx + 2, sy + 9]
-          ]
-          const colors = [PALETTE.book_red, PALETTE.book_blue, PALETTE.book_green, PALETTE.book_purple,
-            PALETTE.book_yellow, PALETTE.book_orange, PALETTE.book_pink, PALETTE.book_white,
-            PALETTE.book_red, PALETTE.book_blue, PALETTE.book_green, PALETTE.book_purple]
-          books.forEach(([bx, by], i) => setPixel(bx, by, colors[i % colors.length]))
-
-          // 顶层装饰
-          setPixel(sx + 1, sy, "#fde047")
-          setPixel(sx + 2, sy, "#fde047")
-        }
-
-        function drawRug(rx, ry, rw, rh) {
-          drawRect(rx, ry, rw, rh, PALETTE.rug_main)
-          drawRect(rx, ry, rw, 1, PALETTE.rug_border)
-          drawRect(rx, ry + rh - 1, rw, 1, PALETTE.rug_border)
-          drawRect(rx, ry, 1, rh, PALETTE.rug_border)
-          drawRect(rx + rw - 1, ry, 1, rh, PALETTE.rug_border)
-          // 地毯花纹
-          drawRect(rx + 3, ry + 1, rw - 6, 1, PALETTE.rug_pattern)
-          drawRect(rx + 3, ry + rh - 2, rw - 6, 1, PALETTE.rug_pattern)
-        }
-
-        function drawFloorLamp(lx, ly) {
-          // 灯座
-          drawRect(lx + 1, ly + 9, 2, 1, PALETTE.lamp_stand)
-          drawRect(lx + 1, ly + 8, 2, 1, PALETTE.lamp_stand)
-          // 灯杆
-          drawRect(lx + 1, ly + 2, 2, 6, PALETTE.lamp_stand)
-          // 灯罩
-          drawRect(lx, ly, 4, 2, PALETTE.lamp_shade)
-          drawRect(lx + 1, ly - 1, 2, 1, PALETTE.lamp_shade)
-          // 灯光
-          if (state.lightOn) {
-            setPixel(lx + 1, ly + 2, PALETTE.lamp_glow)
-            setPixel(lx + 2, ly + 2, PALETTE.lamp_glow)
-          }
-        }
-
-        function drawTrashBin(tx, ty) {
-          drawRect(tx, ty, 3, 3, PALETTE.bin_color)
-          drawRect(tx, ty - 1, 3, 1, PALETTE.bin_lid)
-          setPixel(tx + 1, ty - 1, "#6b7280")
-        }
-
-        function drawPlant(px, py) {
-          // 花盆
-          drawRect(px, py, 3, 2, PALETTE.pot)
-          drawRect(px + 1, py - 1, 1, 1, PALETTE.pot_soil)
-          // 植物
-          setPixel(px + 1, py - 2, PALETTE.plant_green)
-          setPixel(px + 1, py - 3, PALETTE.plant_light)
-          setPixel(px, py - 3, PALETTE.plant_green)
-          setPixel(px + 2, py - 3, PALETTE.plant_green)
-          setPixel(px + 1, py - 4, PALETTE.plant_light)
-          setPixel(px, py - 2, PALETTE.plant_green)
-        }
-
-        function drawCat(x, y) {
-          if (x < 0 || x >= GRID_W || y < 0 || y >= GRID_H) return
-          const cc = { orange: PALETTE.cat_orange, white: PALETTE.cat_white, black: PALETTE.cat_black }
-          const c = cc[state.catColor] || PALETTE.cat_orange
-          if (y - 1 >= 0) setPixel(x, y - 1, c)
-          setPixel(x, y, c)
-          if (x + 1 < GRID_W) { if (y - 1 >= 0) setPixel(x + 1, y - 1, c); setPixel(x + 1, y, c) }
-          if (y - 2 >= 0) { setPixel(x, y - 2, c); if (x + 1 < GRID_W) setPixel(x + 1, y - 2, c) }
-          if (y - 3 >= 0) { setPixel(x, y - 3, c); if (x + 1 < GRID_W) setPixel(x + 1, y - 3, c) }
-          if (x - 1 >= 0 && y - 1 >= 0) setPixel(x - 1, y - 1, c)
-          if (y - 2 >= 0) {
-            setPixel(x, y - 2, "#1f2937")
-            if (x + 1 < GRID_W) setPixel(x + 1, y - 2, "#1f2937")
-            if (state.catDir > 0) setPixel(x + 1, y - 2, "#f8fafc")
-            else setPixel(x, y - 2, "#f8fafc")
-          }
-          if (pixels[y][x]) pixels[y][x].classList.add("cat-anim")
-        }
-
-        function drawCharacter() {
-          if (!state.characterSprite) return
-          const sw = state.characterSprite.width
-          const sh = state.characterSprite.height
-          const sp = state.characterSprite.pixels
-          const topY = CHAR_BASE_Y - sh + 1 + charBob
-          for (let py = 0; py < sh; py++)
-            for (let px = 0; px < sw; px++) {
-              const color = sp[py] && sp[py][px]
-              if (color) setPixel(CHAR_BASE_X + px, topY + py, color)
-            }
-        }
-
-        // ==================== 图片转像素 ====================
-        function rgbToHex(r, g, b) {
-          return "#" + [r, g, b].map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, "0")).join("")
-        }
-
-        function imageToPixelSprite(imgUrl, spriteW, spriteH) {
-          return new Promise((resolve, reject) => {
-            const loadAndConvert = (src, crossOrigin) => {
-              const img = new Image()
-              if (crossOrigin) img.crossOrigin = "anonymous"
-              img.onload = () => {
-                try {
-                  const cv = document.createElement("canvas")
-                  cv.width = spriteW; cv.height = spriteH
-                  const ctx = cv.getContext("2d")
-                  ctx.imageSmoothingEnabled = false
-                  const ratio = img.width / img.height
-                  const sRatio = spriteW / spriteH
-                  let sx, sy, sw, sh
-                  if (ratio > sRatio) { sh = img.height; sw = sh * sRatio; sx = (img.width - sw) / 2; sy = 0 }
-                  else { sw = img.width; sh = sw / sRatio; sx = 0; sy = (img.height - sh) / 2 }
-                  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, spriteW, spriteH)
-                  const data = ctx.getImageData(0, 0, spriteW, spriteH).data
-                  const result = []
-                  for (let y = 0; y < spriteH; y++) {
-                    const row = []
-                    for (let x = 0; x < spriteW; x++) {
-                      const i = (y * spriteW + x) * 4
-                      row.push(data[i + 3] < 128 ? null : rgbToHex(data[i], data[i + 1], data[i + 2]))
-                    }
-                    result.push(row)
-                  }
-                  resolve({ width: spriteW, height: spriteH, pixels: result })
-                } catch (e) { reject(new Error("处理失败")) }
-              }
-              img.onerror = () => { if (crossOrigin) loadAndConvert(src, false); else reject(new Error("图片加载失败")) }
-              img.src = src
-            }
-            loadAndConvert(imgUrl, true)
-          })
-        }
-
-        function createBlankSprite(w, h) {
-          const px = []
-          for (let y = 0; y < h; y++) { const row = []; for (let x = 0; x < w; x++) row.push(null); px.push(row) }
-          return { width: w, height: h, pixels: px }
-        }
-
-        // ==================== 角色弹窗 ====================
-        function openCharPanel() {
-          charNameInput.value = state.characterName || ""
-          if (state.characterSprite) workingSprite = JSON.parse(JSON.stringify(state.characterSprite))
-          else workingSprite = createBlankSprite(DEFAULT_SPRITE_W, DEFAULT_SPRITE_H)
-          editorWInput.value = String(workingSprite.width); editorHInput.value = String(workingSprite.height)
-          buildEditorGrid(); charOverlay.classList.add("active"); loadCharList()
-        }
-        function closeCharPanel() { charOverlay.classList.remove("active") }
-        function switchTab(tabName) {
-          document.querySelectorAll(".roche-plugin-pixel-house .char-tab").forEach(t => t.classList.remove("active"))
-          document.querySelectorAll(".roche-plugin-pixel-house .char-tab-content").forEach(c => c.classList.remove("active"))
-          if (tabName === "chars") { tabChars.classList.add("active"); contentChars.classList.add("active"); loadCharList() }
-          else if (tabName === "upload") { tabUpload.classList.add("active"); contentUpload.classList.add("active") }
-          else if (tabName === "draw") {
-            tabDraw.classList.add("active"); contentDraw.classList.add("active")
-            if (!workingSprite) workingSprite = createBlankSprite(DEFAULT_SPRITE_W, DEFAULT_SPRITE_H)
-            buildEditorGrid()
-          }
-        }
-
-        async function loadCharList() {
-          contentChars.innerHTML = '<div class="char-loading">加载角色列表中...</div>'
-          try {
-            const chars = await roche.character.list()
-            if (!chars || chars.length === 0) { contentChars.innerHTML = '<div class="char-empty">暂无角色</div>'; return }
-            contentChars.innerHTML = ""
-            const listEl = document.createElement("div"); listEl.className = "char-list"
-            chars.forEach(char => {
-              const item = document.createElement("div"); item.className = "char-item"
-              const dn = char.handle || char.name || "未命名"
-              const placeholder = document.createElement("div"); placeholder.className = "char-item-placeholder"; placeholder.textContent = dn.charAt(0) || "?"
-              if (char.avatar) {
-                const avatar = document.createElement("img"); avatar.className = "char-item-avatar"; avatar.src = char.avatar
-                avatar.onerror = () => { avatar.style.display = "none"; placeholder.style.display = "flex" }
-                item.appendChild(avatar); placeholder.style.display = "none"; item.appendChild(placeholder)
-              } else item.appendChild(placeholder)
-              const info = document.createElement("div")
-              const nameEl = document.createElement("div"); nameEl.className = "char-item-name"; nameEl.textContent = dn; info.appendChild(nameEl)
-              if (char.name && char.name !== dn) { const h = document.createElement("div"); h.className = "char-item-handle"; h.textContent = char.name; info.appendChild(h) }
-              item.appendChild(info); item.onclick = () => selectCharacter(char); listEl.appendChild(item)
-            })
-            contentChars.appendChild(listEl)
-          } catch (e) { contentChars.innerHTML = '<div class="char-error">' + (e.message || "错误") + '</div>' }
-        }
-
-        async function selectCharacter(char) {
-          const dn = char.handle || char.name || "自定义角色"; charNameInput.value = dn
-          if (!char.avatar) { roche.ui.toast("该角色没有头像"); return }
-          contentChars.innerHTML = '<div class="char-loading">正在转换...</div>'
-          try {
-            const sprite = await imageToPixelSprite(char.avatar, DEFAULT_SPRITE_W, DEFAULT_SPRITE_H)
-            workingSprite = sprite; editorWInput.value = String(sprite.width); editorHInput.value = String(sprite.height)
-            switchTab("draw"); roche.ui.toast("已导入「" + dn + "」")
-          } catch (e) { contentChars.innerHTML = '<div class="char-error">' + (e.message || "失败") + '</div>' }
-        }
-
-        function handleFileUpload(e) {
-          const file = e.target.files[0]; if (!file) return
-          const reader = new FileReader()
-          reader.onload = async (ev) => {
-            uploadPreview.innerHTML = '<div class="char-loading">正在像素化...</div>'
-            const w = parseInt(widthSlider.value) || DEFAULT_SPRITE_W
-            const h = parseInt(heightSlider.value) || DEFAULT_SPRITE_H
-            try {
-              const sprite = await imageToPixelSprite(ev.target.result, w, h)
-              workingSprite = sprite; editorWInput.value = String(sprite.width); editorHInput.value = String(sprite.height)
-              charNameInput.value = charNameInput.value || "自定义角色"
-              uploadPreview.innerHTML = '<div style="color:#22c55e;font-weight:bold;">✓ 像素化完成</div>'; switchTab("draw")
-              roche.ui.toast("已导入编辑器")
-            } catch (err) { uploadPreview.innerHTML = '<div style="color:#ef4444;">' + (err.message || "失败") + '</div>' }
-          }
-          reader.readAsDataURL(file); e.target.value = ""
-        }
-
-        function buildEditorGrid() {
-          if (!workingSprite) return; editorGrid.innerHTML = ""
-          editorGrid.style.gridTemplateColumns = `repeat(${workingSprite.width}, 22px)`
-          editorGrid.style.gridTemplateRows = `repeat(${workingSprite.height}, 22px)`
-          for (let y = 0; y < workingSprite.height; y++)
-            for (let x = 0; x < workingSprite.width; x++) {
-              const cell = document.createElement("div"); cell.className = "editor-cell"; cell.dataset.x = x; cell.dataset.y = y
-              updateEditorCell(cell, workingSprite.pixels[y][x]); cell.onclick = () => handleEditorClick(x, y); editorGrid.appendChild(cell)
-            }
-        }
-        function updateEditorCell(cell, color) {
-          if (color) { cell.style.backgroundColor = color; cell.classList.remove("transparent") }
-          else { cell.style.backgroundColor = ""; cell.classList.add("transparent") }
-        }
-        function handleEditorClick(x, y) {
-          if (!workingSprite) return
-          workingSprite.pixels[y][x] = editorMode === "erase" ? null : selectedColor
-          const cell = editorGrid.children[y * workingSprite.width + x]; if (cell) updateEditorCell(cell, workingSprite.pixels[y][x])
-        }
-        async function saveCharacter() {
-          if (!workingSprite) { roche.ui.toast("请先创建形象"); return }
-          let has = false
-          for (let y = 0; y < workingSprite.height; y++) { for (let x = 0; x < workingSprite.width; x++) { if (workingSprite.pixels[y][x]) { has = true; break } } if (has) break }
-          if (!has) { roche.ui.toast("形象是空白的"); return }
-          state.characterSprite = workingSprite; state.characterName = charNameInput.value.trim() || "自定义角色"
-          await saveState(); charBtn.textContent = "👤 编辑角色"; closeCharPanel(); drawScene(); roche.ui.toast("已保存！")
-        }
-        async function removeCharacter() {
-          state.characterSprite = null; state.characterName = ""
-          await saveState(); charBtn.textContent = "👤 添加角色"; closeCharPanel(); drawScene(); roche.ui.toast("已移除")
-        }
-
-        // ==================== 交互 ====================
-        function handlePixelClick(x, y) {
-          // 窗户区域
-          if (x >= 12 && x <= 23 && y >= 2 && y <= 11) { toggleDayNight(); return }
-          // 角色
-          if (state.characterSprite) {
-            const sw = state.characterSprite.width; const sh = state.characterSprite.height
-            const topY = CHAR_BASE_Y - sh + 1 + charBob
-            if (x >= CHAR_BASE_X && x < CHAR_BASE_X + sw && y >= topY && y <= CHAR_BASE_Y) {
-              charJumping = true; jumpFrame = 0
-              if (state.characterName) roche.ui.toast("👋 " + state.characterName)
-              return
-            }
-          }
-          // 灯
-          if (x >= 33 && x <= 35 && y >= 10 && y <= 22) { toggleLight(); return }
-          // 猫咪
-          if (Math.abs(x - state.catX) <= 2 && Math.abs(y - state.catY) <= 3) { state.catDir *= -1; saveState(); drawScene(); return }
-          // 书桌
-          if (x >= 4 && x <= 10 && y >= 12 && y <= 24) { cycleWallpaper(); return }
-          // 书柜
-          if (x >= 28 && x <= 31 && y >= 13 && y <= 24) { cycleFloor(); return }
-        }
-
-        async function toggleDayNight() {
-          state.isNight = !state.isNight; await saveState(); drawScene()
-        }
-        async function toggleLight() {
-          state.lightOn = !state.lightOn; lightBtn.textContent = state.lightOn ? "💡 关灯" : "💡 开灯"
-          await saveState(); drawScene()
-        }
-        async function cycleWallpaper() {
-          state.wallPreset = (state.wallPreset + 1) % WALL_PRESETS.length
-          await saveState(); drawScene()
-          roche.ui.toast("墙纸：" + WALL_PRESETS[state.wallPreset].name)
-        }
-        async function cycleFloor() {
-          state.floorPreset = (state.floorPreset + 1) % FLOOR_PRESETS.length
-          await saveState(); drawScene()
-          roche.ui.toast("地板：" + FLOOR_PRESETS[state.floorPreset].name)
-        }
-        async function changeCat() {
-          const cc = ["orange", "white", "black"]
-          state.catColor = cc[(cc.indexOf(state.catColor) + 1) % cc.length]
-          await saveState(); drawScene()
-        }
-        async function saveState() {
-          try {
-            await roche.storage.set("pixelHouseState", {
-              wallPreset: state.wallPreset, floorPreset: state.floorPreset,
-              isNight: state.isNight, lightOn: state.lightOn,
-              catColor: state.catColor,
-              characterSprite: state.characterSprite, characterName: state.characterName
-            })
-          } catch (e) {}
-        }
-
-        // ==================== 动画 ====================
-        let animInterval = setInterval(() => {
-          if (Math.random() > 0.3) {} else {
-            const nx = state.catX + state.catDir
-            if (nx >= 1 && nx < GRID_W - 2) state.catX = nx
-            else state.catDir *= -1
-            if (Math.random() > 0.95) state.catDir *= -1
-          }
-          if (charJumping) {
-            jumpFrame++
-            if (jumpFrame < 6) charBob = -jumpFrame
-            else if (jumpFrame < 12) charBob = -(12 - jumpFrame)
-            else { charJumping = false; jumpFrame = 0; charBob = 0 }
-          } else charBob = Math.sin(Date.now() / 600) > 0 ? 0 : -1
-          drawScene()
-        }, 400)
-
-        drawScene()
-
-        this._cleanup = () => {
-          clearInterval(animInterval)
-          if (styleEl.parentNode) styleEl.parentNode.removeChild(styleEl)
-        }
-      },
-      async unmount(container, roche) {
-        if (this._cleanup) this._cleanup()
-        container.replaceChildren()
+/**
+ * 像素小屋 — Roche 插件 v3.0.0
+ * 基于 RoomApp.tsx 设计模式重写的房间装扮系统
+ * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传
+ */
+;(function () {
+  'use strict'
+
+  // ========== 常量 ==========
+  var FLOOR_HORIZON = 65 // 地板从 65% 处开始
+
+  var WALLPAPER_PRESETS = [
+    { name: '温馨暖白', value: 'radial-gradient(circle at 50% 50%, #fdfbf7 0%, #e2e8f0 100%)' },
+    { name: '深夜蓝调', value: 'linear-gradient(to bottom, #1e293b 0%, #0f172a 100%)' },
+    { name: '少女粉', value: 'radial-gradient(circle at 50% 50%, #fff1f2 0%, #ffe4e6 100%)' },
+    { name: '极简灰', value: 'linear-gradient(135deg, #f3f4f6 0%, #d1d5db 100%)' },
+    { name: '木质感', value: 'repeating-linear-gradient(45deg, #f7fee7 0px, #f7fee7 10px, #ecfccb 10px, #ecfccb 20px)' },
+    { name: '薰衣草', value: 'radial-gradient(circle at 50% 50%, #f3e8ff 0%, #e9d5ff 100%)' },
+    { name: '薄荷绿', value: 'radial-gradient(circle at 50% 50%, #d1fae5 0%, #a7f3d0 100%)' },
+    { name: '奶油黄', value: 'radial-gradient(circle at 50% 50%, #fef9c3 0%, #fde68a 100%)' },
+  ]
+
+  var FLOOR_PRESETS = [
+    { name: '浅色木板', value: 'repeating-linear-gradient(90deg, #e7e5e4 0px, #e7e5e4 20px, #d6d3d1 21px)' },
+    { name: '深色木板', value: 'repeating-linear-gradient(90deg, #78350f 0px, #78350f 20px, #451a03 21px)' },
+    { name: '格纹地砖', value: 'conic-gradient(from 90deg at 2px 2px, #0000 90deg, #cbd5e1 0) 0 0/30px 30px' },
+    { name: '素色地毯', value: '#d1d5db' },
+    { name: '粉色地毯', value: 'repeating-linear-gradient(90deg, #fce7f3 0px, #fce7f3 20px, #fbcfe8 21px)' },
+    { name: '大理石', value: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 50%, #cbd5e1 100%)' },
+  ]
+
+  // 家具预设 — 使用 emoji 作为视觉，用户可上传图片替换
+  var FURNITURE_PRESETS = {
+    furniture: [
+      { name: '床', emoji: '🛏️', defaultScale: 1.6 },
+      { name: '沙发', emoji: '🛋️', defaultScale: 1.5 },
+      { name: '椅子', emoji: '🪑', defaultScale: 1.0 },
+      { name: '桌子', emoji: '🪵', defaultScale: 1.3 },
+      { name: '书桌', emoji: '🖥️', defaultScale: 1.3 },
+      { name: '书架', emoji: '📚', defaultScale: 1.2 },
+      { name: '衣柜', emoji: '🚪', defaultScale: 1.4 },
+      { name: '冰箱', emoji: '🧊', defaultScale: 1.1 },
+    ],
+    decor: [
+      { name: '盆栽', emoji: '🪴', defaultScale: 0.8 },
+      { name: '台灯', emoji: '💡', defaultScale: 0.8 },
+      { name: '画', emoji: '🖼️', defaultScale: 1.0 },
+      { name: '时钟', emoji: '🕐', defaultScale: 0.7 },
+      { name: '吉他', emoji: '🎸', defaultScale: 1.0 },
+      { name: '游戏机', emoji: '🎮', defaultScale: 0.7 },
+      { name: '花瓶', emoji: '💐', defaultScale: 0.7 },
+      { name: '蜡烛', emoji: '🕯️', defaultScale: 0.6 },
+    ],
+    food: [
+      { name: '咖啡', emoji: '☕', defaultScale: 0.5 },
+      { name: '蛋糕', emoji: '🎂', defaultScale: 0.6 },
+      { name: '披萨', emoji: '🍕', defaultScale: 0.7 },
+      { name: '苹果', emoji: '🍎', defaultScale: 0.5 },
+      { name: '甜甜圈', emoji: '🍩', defaultScale: 0.5 },
+    ],
+    rug: [
+      { name: '条纹地毯', emoji: '🟫', defaultScale: 1.8, isRug: true },
+      { name: '圆形地毯', emoji: '⭕', defaultScale: 1.8, isRug: true },
+    ],
+  }
+
+  var CATEGORY_LABELS = {
+    furniture: '家具',
+    decor: '装饰',
+    food: '食物',
+    rug: '地毯',
+    custom: '自定义',
+  }
+
+  // ========== 状态 ==========
+  var state = {
+    view: 'select', // 'select' | 'room'
+    mode: 'view', // 'view' | 'edit'
+    activeCharId: null,
+    characters: [],
+    items: [],
+    wallImage: '',
+    floorImage: '',
+    selectedItemId: null,
+    showLibrary: false,
+    showCustomModal: false,
+    customAssets: [],
+    isToolbarCollapsed: false,
+    // drag
+    draggingId: null,
+    dragStart: null,
+    dragElement: null,
+    pendingPos: null,
+    rafId: null,
+    // custom modal
+    customName: '',
+    customEmoji: '',
+    customUrl: '',
+    customType: 'furniture',
+  }
+
+  var root = null
+  var rocheApi = null
+  var styleEl = null
+
+  // ========== CSS ==========
+  var CSS = `
+.roche-plugin-pixel-house {
+  --ph-primary: #6366f1;
+  --ph-primary-light: #e0e7ff;
+  --ph-bg: #f8fafc;
+  --ph-text: #1e293b;
+  --ph-text-muted: #94a3b8;
+  --ph-border: #e2e8f0;
+  --ph-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+  --ph-radius: 16px;
+  height: 100%;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--ph-bg);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.roche-plugin-pixel-house * { box-sizing: border-box; margin: 0; padding: 0; }
+.roche-plugin-pixel-house button { cursor: pointer; border: none; background: none; font-family: inherit; }
+.roche-plugin-pixel-house input { font-family: inherit; }
+
+/* ===== 选人页 ===== */
+.ph-select-page {
+  height: 100%; width: 100%; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #efe9f7 0%, #f4eff9 45%, #f7f2fb 100%);
+  position: relative; overflow: hidden;
+}
+.ph-stars {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.6;
+  background-image:
+    radial-gradient(1.5px 1.5px at 14% 16%, rgba(190,160,225,.45), transparent),
+    radial-gradient(1px 1px at 80% 12%, rgba(220,190,235,.5), transparent),
+    radial-gradient(1.5px 1.5px at 42% 28%, rgba(180,200,240,.4), transparent),
+    radial-gradient(1px 1px at 86% 42%, rgba(200,175,230,.4), transparent),
+    radial-gradient(1px 1px at 22% 66%, rgba(210,185,235,.35), transparent),
+    radial-gradient(1px 1px at 66% 80%, rgba(200,210,240,.35), transparent);
+}
+.ph-select-header { position: relative; z-index: 2; padding: max(3rem, env(safe-area-inset-top)) 1.5rem 0; text-align: center; }
+.ph-back-btn {
+  position: absolute; left: 1rem; top: max(3rem, env(safe-area-inset-top));
+  padding: 8px; border-radius: 50%; color: #a78bca; transition: all .2s;
+  display: flex; align-items: center; justify-content: center;
+}
+.ph-back-btn:active { transform: scale(0.9); }
+.ph-select-title {
+  font-size: 26px; letter-spacing: 0.15em; color: #6a5790;
+  text-shadow: 0 2px 18px rgba(170,150,220,.4);
+  font-family: 'Noto Serif SC', serif; font-weight: 300;
+}
+.ph-select-subtitle { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; }
+.ph-select-subtitle span.line { height: 1px; width: 40px; background: linear-gradient(90deg, transparent, rgba(150,120,190,.5)); }
+.ph-select-subtitle span.line.r { background: linear-gradient(270deg, transparent, rgba(150,120,190,.5)); }
+.ph-select-subtitle span.text { font-size: 9px; letter-spacing: 0.45em; font-weight: 700; color: rgba(160,130,200,.7); }
+.ph-select-desc { position: relative; z-index: 2; text-align: center; font-size: 11px; margin-top: 16px; padding: 0 2rem; color: rgba(160,130,200,.7); line-height: 1.6; }
+.ph-char-grid { position: relative; z-index: 2; flex: 1; overflow-y: auto; padding: 16px 20px 20px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; align-content: start; }
+.ph-char-grid::-webkit-scrollbar { display: none; }
+.ph-char-card {
+  position: relative; border-radius: var(--ph-radius); padding: 32px 12px 20px;
+  display: flex; flex-direction: column; align-items: center;
+  transition: all .2s; overflow: hidden; border: 1px solid rgba(170,140,210,.3);
+  box-shadow: 0 8px 22px rgba(150,120,200,.18);
+}
+.ph-char-card:active { transform: scale(0.95); }
+.ph-char-card .inner-frame { position: absolute; inset: 7px; border-radius: 12px; border: 1px solid rgba(170,140,210,.22); pointer-events: none; }
+.ph-char-card .gem { position: absolute; width: 6px; height: 6px; transform: rotate(45deg); background: rgba(190,160,220,.85); }
+.ph-char-card .gem.tl { top: 10px; left: 10px; }
+.ph-char-card .gem.tr { top: 10px; right: 10px; }
+.ph-char-card .gem.bl { bottom: 10px; left: 10px; }
+.ph-char-card .gem.br { bottom: 10px; right: 10px; }
+.ph-avatar-wrap { position: relative; width: 92px; height: 92px; display: flex; align-items: center; justify-content: center; }
+.ph-avatar-compass {
+  position: absolute; width: 124px; height: 124px; border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, rgba(170,140,210,.16) 0deg 2.4deg, transparent 2.4deg 9deg);
+  -webkit-mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
+  mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
+}
+.ph-avatar-halo { position: absolute; width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle, rgba(200,175,235,.3), transparent 62%); }
+.ph-avatar-ring1 { position: absolute; inset: 8px; border-radius: 50%; border: 1px solid rgba(180,150,215,.5); }
+.ph-avatar-ring2 { position: absolute; inset: 12px; border-radius: 50%; border: 1px solid rgba(180,150,215,.25); }
+.ph-avatar-img { width: 70px; height: 70px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 18px rgba(190,160,235,.4); position: relative; z-index: 1; }
+.ph-avatar-img img { width: 100%; height: 100%; object-fit: cover; }
+.ph-avatar-badge {
+  position: absolute; bottom: 0; right: 6px; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 5px rgba(120,90,170,.3);
+  display: flex; align-items: center; justify-content: center; font-size: 10px; z-index: 2;
+}
+.ph-char-name { margin-top: 12px; font-size: 14px; font-weight: 600; letter-spacing: 0.5px; color: #4a3a6a; font-family: 'Noto Serif SC', serif; }
+.ph-char-sub { margin-top: 2px; font-size: 10px; color: rgba(160,130,200,.7); }
+.ph-empty { text-align: center; font-size: 12px; color: rgba(160,130,200,.6); padding: 64px 0; grid-column: 1 / -1; }
+
+/* ===== 房间页 ===== */
+.ph-room-page { height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; background: var(--ph-bg); }
+
+/* 房间舞台 */
+.ph-stage { flex: 1; position: relative; overflow: hidden; touch-action: none; transition: all .5s; }
+.ph-wall { position: absolute; top: 0; left: 0; width: 100%; height: 65%; transition: background .5s; z-index: 0; }
+.ph-floor { position: absolute; bottom: 0; left: 0; width: 100%; height: 35%; transition: background .5s; z-index: 0; }
+.ph-horizon-shadow { position: absolute; top: 65%; width: 100%; height: 32px; background: linear-gradient(to bottom, rgba(0,0,0,0.1), transparent); pointer-events: none; z-index: 0; }
+
+/* 家具 */
+.ph-item {
+  position: absolute; transform-origin: bottom center; touch-action: none;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); transition: transform .2s ease-out;
+}
+.ph-item.dragging { transition: none; z-index: 100 !important; will-change: left, top; }
+.ph-item.selected { outline: 2px solid var(--ph-primary); outline-offset: 4px; border-radius: 8px; }
+.ph-item .item-visual { width: 100%; height: auto; object-fit: contain; pointer-events: none; display: block; }
+.ph-item .item-emoji {
+  width: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 48px; line-height: 1; pointer-events: none;
+}
+.ph-item .selected-label {
+  position: absolute; top: -24px; left: 50%; transform: translateX(-50%);
+  background: var(--ph-primary); color: #fff; font-size: 9px; padding: 2px 8px;
+  border-radius: 10px; white-space: nowrap;
+}
+
+/* 角色 */
+.ph-actor {
+  position: absolute; transform-origin: bottom center; transition: left 1s ease-in-out, top 1s ease-in-out;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); cursor: pointer;
+}
+.ph-actor img { width: 100%; height: 100%; object-fit: contain; }
+.ph-actor.walking img { animation: ph-bounce 0.5s ease-in-out; }
+.ph-actor .bubble {
+  position: absolute; bottom: 105%; left: 50%; transform: translateX(-50%);
+  background: #fff; padding: 12px 16px; border-radius: 20px; border-bottom-left-radius: 4px;
+  box-shadow: var(--ph-shadow); border: 2px solid rgba(0,0,0,0.05);
+  min-width: 120px; max-width: 280px; z-index: 50; animation: ph-pop-in .2s ease-out;
+}
+.ph-actor .bubble p { font-size: 12px; font-weight: 700; color: var(--ph-text); text-align: center; word-break: break-word; line-height: 1.4; }
+.ph-actor .bubble .close-btn {
+  position: absolute; top: -8px; right: -8px; background: #e2e8f0; color: #64748b;
+  border-radius: 50%; width: 16px; height: 16px; display: flex; align-items: center;
+  justify-content: center; font-size: 8px;
+}
+
+/* 顶部工具栏 */
+.ph-top-bar {
+  position: absolute; top: 0; left: 0; width: 100%; padding: max(3rem, env(safe-area-inset-top)) 1rem 0.5rem;
+  display: flex; justify-content: space-between; z-index: 30; pointer-events: none;
+}
+.ph-top-bar > * { pointer-events: auto; }
+.ph-icon-btn {
+  background: rgba(255,255,255,0.9); padding: 8px; border-radius: 50%; box-shadow: var(--ph-shadow);
+  display: flex; align-items: center; justify-content: center; transition: all .2s; color: var(--ph-text);
+}
+.ph-icon-btn:active { transform: scale(0.9); }
+.ph-icon-btn:disabled { opacity: 0.4; }
+.ph-icon-btn.active { background: var(--ph-primary); color: #fff; }
+.ph-mode-btn {
+  background: #fff; color: var(--ph-text); padding: 8px 16px; border-radius: 20px;
+  font-size: 12px; font-weight: 700; box-shadow: var(--ph-shadow); transition: all .2s;
+}
+.ph-mode-btn.active { background: var(--ph-primary); color: #fff; }
+.ph-mode-btn:active { transform: scale(0.95); }
+.ph-top-right { display: flex; gap: 8px; }
+
+/* 底部装修工具栏 */
+.ph-edit-toolbar {
+  position: absolute; bottom: 0; width: 100%; background: #fff; border-top: 1px solid var(--ph-border);
+  z-index: 150; transition: transform .3s; display: flex; flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom); max-height: 45vh;
+}
+.ph-edit-toolbar.collapsed { transform: translateY(calc(100% - 2.5rem - env(safe-area-inset-bottom))); }
+.ph-toolbar-handle { width: 100%; height: 2.5rem; display: flex; align-items: center; justify-content: center; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
+.ph-toolbar-handle div { width: 40px; height: 4px; background: #e2e8f0; border-radius: 2px; }
+.ph-toolbar-content { padding: 16px; overflow-y: auto; flex: 1; }
+.ph-toolbar-content::-webkit-scrollbar { display: none; }
+
+/* 工具栏快捷按钮 */
+.ph-quick-actions { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.ph-quick-actions::-webkit-scrollbar { display: none; }
+.ph-quick-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+.ph-quick-btn .icon-box {
+  width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  font-size: 20px; color: #fff; box-shadow: var(--ph-shadow); transition: transform .15s;
+}
+.ph-quick-btn:active .icon-box { transform: scale(0.92); }
+.ph-quick-btn .label { font-size: 10px; font-weight: 700; color: var(--ph-text-muted); }
+
+/* 预设行 */
+.ph-preset-row { margin-top: 12px; }
+.ph-preset-row h4 { font-size: 10px; font-weight: 700; color: var(--ph-text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+.ph-preset-list { display: flex; gap: 8px; overflow-x: auto; }
+.ph-preset-list::-webkit-scrollbar { display: none; }
+.ph-preset-swatch { width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--ph-border); flex-shrink: 0; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+
+/* 选中物品编辑面板 */
+.ph-item-editor { display: flex; flex-direction: column; gap: 12px; }
+.ph-editor-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ph-editor-header .title { font-size: 12px; font-weight: 700; color: var(--ph-text-muted); }
+.ph-editor-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.ph-editor-actions button { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px; }
+.ph-editor-actions .dup { background: #e0e7ff; color: var(--ph-primary); }
+.ph-editor-actions .del { background: #fef2f2; color: #ef4444; }
+.ph-slider-group { display: flex; gap: 16px; align-items: stretch; }
+.ph-slider-col { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ph-slider-row label { display: block; font-size: 10px; color: var(--ph-text-muted); margin-bottom: 4px; }
+.ph-slider-row label .val { color: var(--ph-text); font-weight: 700; }
+.ph-slider-row input[type=range] { width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px; -webkit-appearance: none; appearance: none; }
+.ph-slider-row input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; background: var(--ph-primary); border-radius: 50%; cursor: pointer; }
+.ph-numpad { display: grid; grid-template-columns: repeat(3, 36px); gap: 4px; flex-shrink: 0; align-self: center; }
+.ph-numpad button { width: 36px; height: 36px; background: #f1f5f9; border-radius: 8px; color: var(--ph-text-muted); font-weight: 700; font-size: 14px; transition: all .15s; }
+.ph-numpad button:active { background: #e0e7ff; color: var(--ph-primary); transform: scale(0.92); }
+.ph-numpad .spacer { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #cbd5e1; }
+
+/* 模态框 */
+.ph-modal-overlay {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.4); z-index: 400;
+  display: flex; align-items: flex-end; justify-content: center; animation: ph-fade-in .2s;
+}
+.ph-modal {
+  background: #fff; width: 100%; max-width: 500px; max-height: 85vh; border-radius: 24px 24px 0 0;
+  display: flex; flex-direction: column; animation: ph-slide-up .3s ease-out;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.ph-modal-header { padding: 20px 24px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; }
+.ph-modal-header h3 { font-size: 16px; font-weight: 700; color: var(--ph-text); }
+.ph-modal-header .close { padding: 4px; color: var(--ph-text-muted); }
+.ph-modal-body { flex: 1; overflow-y: auto; padding: 16px 24px; }
+.ph-modal-body::-webkit-scrollbar { display: none; }
+.ph-modal-footer { padding: 12px 24px 20px; border-top: 1px solid #f1f5f9; }
+.ph-modal-footer button { width: 100%; padding: 12px; border-radius: 16px; font-size: 12px; font-weight: 700; }
+
+/* 家具库 */
+.ph-library-section { margin-bottom: 24px; }
+.ph-library-section h4 {
+  font-size: 12px; font-weight: 700; color: var(--ph-text-muted); text-transform: uppercase;
+  letter-spacing: 1px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;
+}
+.ph-library-section h4 .count { font-size: 9px; background: #f1f5f9; padding: 2px 8px; border-radius: 10px; }
+.ph-library-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.ph-library-item { display: flex; flex-direction: column; align-items: center; gap: 8px; transition: transform .15s; }
+.ph-library-item:active { transform: scale(0.92); }
+.ph-library-item .icon-box {
+  width: 56px; height: 56px; background: #f8fafc; border-radius: 12px; border: 1px solid #f1f5f9;
+  display: flex; align-items: center; justify-content: center; font-size: 28px; overflow: hidden; transition: border-color .2s;
+}
+.ph-library-item:hover .icon-box { border-color: var(--ph-primary); }
+.ph-library-item .icon-box img { width: 100%; height: 100%; object-fit: contain; }
+.ph-library-item .name { font-size: 10px; color: var(--ph-text-muted); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 自定义家具弹窗 */
+.ph-custom-form { display: flex; flex-direction: column; gap: 16px; }
+.ph-custom-top { display: flex; gap: 16px; }
+.ph-upload-box {
+  width: 96px; aspect-ratio: 1; background: #f1f5f9; border-radius: 16px; border: 2px dashed #cbd5e1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
+  overflow: hidden; transition: border-color .2s; position: relative;
+}
+.ph-upload-box:hover { border-color: var(--ph-primary); }
+.ph-upload-box img { width: 100%; height: 100%; object-fit: contain; }
+.ph-upload-box .placeholder { font-size: 12px; color: var(--ph-text-muted); }
+.ph-custom-fields { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.ph-input-group label { font-size: 10px; font-weight: 700; color: var(--ph-text-muted); text-transform: uppercase; display: block; margin-bottom: 4px; }
+.ph-input-group input {
+  width: 100%; background: #f8fafc; border: 1px solid var(--ph-border); border-radius: 12px;
+  padding: 8px 12px; font-size: 13px; color: var(--ph-text); outline: none; transition: border-color .2s;
+}
+.ph-input-group input:focus { border-color: var(--ph-primary); }
+.ph-type-toggle { display: flex; gap: 8px; }
+.ph-type-toggle button {
+  flex: 1; padding: 8px; border-radius: 12px; font-size: 12px; font-weight: 700; border: 1px solid var(--ph-border);
+  transition: all .2s; color: var(--ph-text-muted); background: #f8fafc;
+}
+.ph-type-toggle button.active { background: var(--ph-primary-light); border-color: var(--ph-primary); color: var(--ph-primary); }
+
+/* 观察卡片 */
+.ph-observation {
+  position: absolute; left: 16px; right: 16px; background: #fff; padding: 20px; border-radius: var(--ph-radius);
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid #f1f5f9; z-index: 150; animation: ph-slide-up .3s;
+  bottom: calc(1.5rem + env(safe-area-inset-bottom));
+}
+.ph-observation .header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px; }
+.ph-observation .header span { font-size: 12px; font-weight: 700; color: var(--ph-primary); text-transform: uppercase; letter-spacing: 2px; }
+.ph-observation .header button { color: var(--ph-text-muted); }
+.ph-observation p { font-size: 14px; color: var(--ph-text); line-height: 1.6; }
+
+/* 动画 */
+@keyframes ph-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes ph-pop-in { from { opacity: 0; transform: translateX(-50%) scale(0.8); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+@keyframes ph-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ph-slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes ph-bounce-actor { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+`
+
+  // ========== 工具函数 ==========
+  function el(tag, className, attrs) {
+    var e = document.createElement(tag)
+    if (className) e.className = className
+    if (attrs) {
+      for (var k in attrs) {
+        if (k === 'text') e.textContent = attrs[k]
+        else if (k === 'html') e.innerHTML = attrs[k]
+        else if (k === 'style') e.setAttribute('style', attrs[k])
+        else e.setAttribute(k, attrs[k])
       }
     }
-  ]
-})
+    return e
+  }
+
+  function svgIcon(path, size) {
+    size = size || 24
+    return '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:' + size + 'px;height:' + size + 'px"><path stroke-linecap="round" stroke-linejoin="round" d="' + path + '"/></svg>'
+  }
+
+  var ICONS = {
+    back: 'M15.75 19.5 8.25 12l7.5-7.5',
+    close: 'M6 18 18 6M6 6l12 12',
+    plus: 'M12 4.5v15m7.5-7.5h-15',
+    sparkle: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+    camera: 'M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.174-1.26.21-2.152 1.35-2.152 2.625v7.596c0 1.397 1.17 2.476 2.564 2.362a47.24 47.24 0 0 0 13.872 0c1.394.114 2.564-.965 2.564-2.362V9.854c0-1.275-.892-2.415-2.152-2.625a37.5 37.5 0 0 0-1.134-.174 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.822 1.316ZM16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z',
+    image: 'm2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z',
+    settings: 'M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28ZM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+    trash: 'm14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0',
+    copy: 'M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75',
+    eye: 'M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+    eyeOff: 'M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88',
+    undo: 'M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3',
+    redo: 'm15 15 6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3',
+  }
+
+  function getStorageKey() {
+    return 'room_' + (state.activeCharId || 'default')
+  }
+
+  async function loadRoomData() {
+    if (!rocheApi) return
+    var data = await rocheApi.storage.get(getStorageKey())
+    if (data) {
+      try {
+        var parsed = typeof data === 'string' ? JSON.parse(data) : data
+        state.items = parsed.items || []
+        state.wallImage = parsed.wallImage || ''
+        state.floorImage = parsed.floorImage || ''
+      } catch (e) {
+        state.items = []
+      }
+    } else {
+      state.items = []
+    }
+  }
+
+  async function saveRoomData() {
+    if (!rocheApi) return
+    var data = {
+      items: state.items,
+      wallImage: state.wallImage,
+      floorImage: state.floorImage,
+    }
+    await rocheApi.storage.set(getStorageKey(), JSON.stringify(data))
+  }
+
+  async function loadCustomAssets() {
+    if (!rocheApi) return
+    var data = await rocheApi.storage.get('custom_assets')
+    if (data) {
+      try {
+        state.customAssets = typeof data === 'string' ? JSON.parse(data) : data
+      } catch (e) {
+        state.customAssets = []
+      }
+    }
+  }
+
+  async function saveCustomAssets() {
+    if (!rocheApi) return
+    await rocheApi.storage.set('custom_assets', JSON.stringify(state.customAssets))
+  }
+
+  // ========== 渲染：选人页 ==========
+  function renderSelectPage() {
+    root.innerHTML = ''
+    var page = el('div', 'ph-select-page')
+
+    // 星点
+    page.appendChild(el('div', 'ph-stars'))
+
+    // 顶部
+    var header = el('div', 'ph-select-header')
+    var backBtn = el('button', 'ph-back-btn', { html: svgIcon(ICONS.back, 24) })
+    backBtn.onclick = function () { if (rocheApi) rocheApi.ui.closeApp() }
+    header.appendChild(backBtn)
+
+    var title = el('h1', 'ph-select-title', { text: '拜访谁的房间？' })
+    header.appendChild(title)
+
+    var subtitle = el('div', 'ph-select-subtitle')
+    subtitle.appendChild(el('span', 'line'))
+    subtitle.appendChild(el('span', 'text', { text: '✦ VISIT ROOM ✦' }))
+    subtitle.appendChild(el('span', 'line r'))
+    header.appendChild(subtitle)
+    page.appendChild(header)
+
+    var desc = el('p', 'ph-select-desc', { text: '走进谁的房间，看看 ta 此刻在做什么、翻翻屋里的小物件。' })
+    page.appendChild(desc)
+
+    // 角色网格
+    var grid = el('div', 'ph-char-grid')
+    var tints = [
+      'linear-gradient(180deg,rgba(250,212,228,.85),rgba(242,228,246,.8))',
+      'linear-gradient(180deg,rgba(232,228,248,.85),rgba(242,238,250,.8))',
+      'linear-gradient(180deg,rgba(226,216,246,.85),rgba(238,230,249,.8))',
+      'linear-gradient(180deg,rgba(212,230,247,.85),rgba(234,240,250,.8))',
+      'linear-gradient(180deg,rgba(226,212,245,.85),rgba(238,228,249,.8))',
+      'linear-gradient(180deg,rgba(234,231,242,.88),rgba(242,240,247,.82))',
+    ]
+
+    if (!state.characters || state.characters.length === 0) {
+      grid.appendChild(el('div', 'ph-empty', { text: '还没有角色，先去创建一个吧。' }))
+    } else {
+      state.characters.forEach(function (c, i) {
+        var card = el('button', 'ph-char-card')
+        card.style.background = tints[i % tints.length]
+
+        card.appendChild(el('div', 'inner-frame'))
+        card.appendChild(el('span', 'gem tl'))
+        card.appendChild(el('span', 'gem tr'))
+        card.appendChild(el('span', 'gem bl'))
+        card.appendChild(el('span', 'gem br'))
+
+        var avatarWrap = el('div', 'ph-avatar-wrap')
+        avatarWrap.appendChild(el('div', 'ph-avatar-compass'))
+        avatarWrap.appendChild(el('div', 'ph-avatar-halo'))
+        avatarWrap.appendChild(el('div', 'ph-avatar-ring1'))
+        avatarWrap.appendChild(el('div', 'ph-avatar-ring2'))
+        var avatarImg = el('div', 'ph-avatar-img')
+        var img = el('img')
+        img.src = c.avatar || ''
+        img.alt = c.name || ''
+        img.onerror = function () { this.style.display = 'none' }
+        avatarImg.appendChild(img)
+        avatarWrap.appendChild(avatarImg)
+
+        var badge = el('div', 'ph-avatar-badge')
+        badge.innerHTML = svgIcon('M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75', 14)
+        badge.style.color = '#a78bca'
+        avatarWrap.appendChild(badge)
+        card.appendChild(avatarWrap)
+
+        var name = c.handle || c.name || '未知角色'
+        card.appendChild(el('span', 'ph-char-name', { text: name }))
+        card.appendChild(el('span', 'ph-char-sub', { text: '拜访 ta 的房间' }))
+
+        card.onclick = function () { enterRoom(c) }
+        grid.appendChild(card)
+      })
+    }
+
+    page.appendChild(grid)
+    root.appendChild(page)
+  }
+
+  // ========== 进入房间 ==========
+  async function enterRoom(character) {
+    state.activeCharId = character.id
+    state.activeCharacter = character
+    state.view = 'room'
+    state.mode = 'view'
+    state.selectedItemId = null
+    state.isToolbarCollapsed = false
+    await loadRoomData()
+    renderRoomPage()
+  }
+
+  // ========== 渲染：房间页 ==========
+  function renderRoomPage() {
+    root.innerHTML = ''
+
+    var page = el('div', 'ph-room-page')
+
+    // 舞台
+    var stage = el('div', 'ph-stage')
+    stage.id = 'ph-stage'
+
+    // 墙
+    var wall = el('div', 'ph-wall')
+    wall.id = 'ph-wall'
+    wall.style.background = state.wallImage || WALLPAPER_PRESETS[0].value
+    stage.appendChild(wall)
+
+    // 地板
+    var floor = el('div', 'ph-floor')
+    floor.id = 'ph-floor'
+    floor.style.background = state.floorImage || FLOOR_PRESETS[0].value
+    stage.appendChild(floor)
+
+    // 地平线阴影
+    stage.appendChild(el('div', 'ph-horizon-shadow'))
+
+    // 家具
+    state.items.forEach(function (item) {
+      stage.appendChild(createItemElement(item))
+    })
+
+    // 角色
+    var actor = createActorElement()
+    if (actor) stage.appendChild(actor)
+
+    // 舞台点击
+    stage.addEventListener('click', function (e) {
+      if (e.target === stage || e.target === wall || e.target === floor || e.target.classList.contains('ph-horizon-shadow')) {
+        if (state.mode === 'edit') {
+          state.selectedItemId = null
+          renderEditToolbar()
+        }
+      }
+    })
+
+    page.appendChild(stage)
+
+    // 顶部工具栏
+    var topBar = el('div', 'ph-top-bar')
+
+    var backBtn = el('button', 'ph-icon-btn', { html: svgIcon(ICONS.back, 24) })
+    backBtn.onclick = function () {
+      state.view = 'select'
+      state.activeCharId = null
+      state.activeCharacter = null
+      renderSelectPage()
+    }
+    topBar.appendChild(backBtn)
+
+    var topRight = el('div', 'ph-top-right')
+
+    // 编辑模式：撤销/重做（简化版）
+    if (state.mode === 'edit') {
+      var hideActorBtn = el('button', 'ph-icon-btn', { html: svgIcon(ICONS.eye, 22) })
+      hideActorBtn.id = 'ph-hide-actor'
+      hideActorBtn.onclick = function () {
+        var actor = document.getElementById('ph-actor')
+        if (actor) {
+          var hidden = actor.style.display === 'none'
+          actor.style.display = hidden ? '' : 'none'
+          hideActorBtn.innerHTML = hidden ? svgIcon(ICONS.eye, 22) : svgIcon(ICONS.eyeOff, 22)
+          hideActorBtn.classList.toggle('active', !hidden)
+        }
+      }
+      topRight.appendChild(hideActorBtn)
+    }
+
+    var modeBtn = el('button', 'ph-mode-btn')
+    modeBtn.textContent = state.mode === 'edit' ? '完成' : '装修'
+    if (state.mode === 'edit') modeBtn.classList.add('active')
+    modeBtn.onclick = function () {
+      state.mode = state.mode === 'view' ? 'edit' : 'view'
+      state.selectedItemId = null
+      renderRoomPage()
+    }
+    topRight.appendChild(modeBtn)
+    topBar.appendChild(topRight)
+    page.appendChild(topBar)
+
+    // 编辑模式工具栏
+    if (state.mode === 'edit') {
+      page.appendChild(createEditToolbar())
+    }
+
+    root.appendChild(page)
+  }
+
+  // ========== 创建家具元素 ==========
+  function createItemElement(item) {
+    var div = el('div', 'ph-item')
+    div.dataset.id = item.id
+    div.style.left = item.x + '%'
+    div.style.top = item.y + '%'
+    div.style.width = (80 * item.scale) + 'px'
+    div.style.transform = 'translate(-50%, -100%) rotate(' + (item.rotation || 0) + 'deg)'
+
+    // z-index: 地毯在底层
+    if (item.type === 'rug') {
+      div.style.zIndex = String(1 + Math.floor(item.y / 10))
+    } else {
+      div.style.zIndex = String(Math.floor(item.y))
+    }
+
+    // 内容
+    if (item.image && (item.image.startsWith('http') || item.image.startsWith('data') || item.image.startsWith('blob'))) {
+      var img = el('img', 'item-visual')
+      img.src = item.image
+      img.draggable = false
+      div.appendChild(img)
+    } else {
+      var emojiDiv = el('div', 'item-emoji')
+      emojiDiv.textContent = item.emoji || item.image || '📦'
+      div.appendChild(emojiDiv)
+    }
+
+    // 选中标记
+    if (state.mode === 'edit' && state.selectedItemId === item.id) {
+      div.classList.add('selected')
+      var label = el('div', 'selected-label', { text: '选中' })
+      div.appendChild(label)
+    }
+
+    // 事件
+    if (state.mode === 'edit') {
+      div.style.cursor = 'grab'
+      div.addEventListener('pointerdown', function (e) { handlePointerDown(e, item.id) })
+      div.addEventListener('wheel', function (e) {
+        if (state.selectedItemId !== item.id) return
+        e.preventDefault()
+        var next = Math.min(6, Math.max(0.2, item.scale + (e.deltaY < 0 ? 0.08 : -0.08)))
+        updateSelectedItem({ scale: Math.round(next * 100) / 100 })
+      })
+    } else {
+      if (item.isInteractive !== false) {
+        div.style.cursor = 'pointer'
+        div.addEventListener('click', function (e) {
+          e.stopPropagation()
+          lookAtItem(item)
+        })
+      }
+    }
+
+    return div
+  }
+
+  // ========== 创建角色元素 ==========
+  function createActorElement() {
+    if (!state.activeCharacter) return null
+    var actor = el('div', 'ph-actor')
+    actor.id = 'ph-actor'
+    actor.style.left = '50%'
+    actor.style.top = '78%'
+    actor.style.width = '100px'
+    actor.style.zIndex = '98'
+
+    var img = el('img')
+    var avatarUrl = state.activeCharacter.avatar || ''
+    img.src = avatarUrl
+    img.alt = state.activeCharacter.name || ''
+    img.onerror = function () {
+      this.style.display = 'none'
+      var fallback = el('div', 'item-emoji')
+      fallback.textContent = '🧑'
+      fallback.style.fontSize = '64px'
+      actor.appendChild(fallback)
+    }
+    actor.appendChild(img)
+
+    if (state.mode === 'edit') {
+      actor.addEventListener('click', function (e) {
+        e.stopPropagation()
+        showActorArtModal()
+      })
+    } else {
+      actor.addEventListener('click', function (e) {
+        e.stopPropagation()
+        pokeActor()
+      })
+    }
+
+    return actor
+  }
+
+  // ========== 角色互动 ==========
+  function pokeActor() {
+    var actor = document.getElementById('ph-actor')
+    if (!actor) return
+    actor.style.animation = 'ph-bounce-actor 0.5s ease'
+    setTimeout(function () { actor.style.animation = '' }, 500)
+    var thoughts = ['嗯？', '别闹...', '我在呢。', '盯着我看干嘛...', '(发呆)', '...嗯？', '怎么了？']
+    showBubble(thoughts[Math.floor(Math.random() * thoughts.length)])
+  }
+
+  function lookAtItem(item) {
+    // 角色走向物品
+    var actor = document.getElementById('ph-actor')
+    if (actor) {
+      var targetY = Math.max(FLOOR_HORIZON, item.y + 5)
+      actor.style.left = item.x + '%'
+      actor.style.top = targetY + '%'
+      actor.classList.add('walking')
+      setTimeout(function () { actor.classList.remove('walking') }, 600)
+    }
+    var desc = item.description || (item.name + '静静地摆放在那里。')
+    showObservation(desc)
+    var reactions = ['(盯...)', '嗯，这个啊...', '...', '哼，没什么好看的。', '那个啊...']
+    showBubble(reactions[Math.floor(Math.random() * reactions.length)])
+  }
+
+  function showBubble(text) {
+    var actor = document.getElementById('ph-actor')
+    if (!actor) return
+    var existing = actor.querySelector('.bubble')
+    if (existing) existing.remove()
+    var bubble = el('div', 'bubble')
+    bubble.appendChild(el('p', '', { text: text }))
+    var closeBtn = el('button', 'close-btn', { text: '×' })
+    closeBtn.onclick = function (e) { e.stopPropagation(); bubble.remove() }
+    bubble.appendChild(closeBtn)
+    actor.appendChild(bubble)
+    setTimeout(function () { if (bubble.parentNode) bubble.remove() }, 5000)
+  }
+
+  function showObservation(text) {
+    var existing = document.querySelector('.ph-observation')
+    if (existing) existing.remove()
+    var card = el('div', 'ph-observation')
+    var header = el('div', 'header')
+    header.appendChild(el('span', '', { text: 'OBSERVATION' }))
+    var closeBtn = el('button', '', { html: svgIcon(ICONS.close, 18) })
+    closeBtn.onclick = function () { card.remove() }
+    header.appendChild(closeBtn)
+    card.appendChild(header)
+    card.appendChild(el('p', '', { text: text }))
+    root.querySelector('.ph-room-page').appendChild(card)
+    setTimeout(function () { if (card.parentNode) card.remove() }, 8000)
+  }
+
+  // ========== 角色立绘弹窗 ==========
+  function showActorArtModal() {
+    var overlay = el('div', 'ph-modal-overlay')
+    var modal = el('div', 'ph-modal')
+
+    var header = el('div', 'ph-modal-header')
+    header.appendChild(el('h3', '', { text: '角色信息' }))
+    var closeBtn = el('button', 'close', { html: svgIcon(ICONS.close, 22) })
+    closeBtn.onclick = function () { overlay.remove() }
+    header.appendChild(closeBtn)
+    modal.appendChild(header)
+
+    var body = el('div', 'ph-modal-body')
+    var char = state.activeCharacter
+    if (char) {
+      var info = el('div', '', { style: 'text-align:center;' })
+      var imgBox = el('div', '', { style: 'width:80px;height:80px;border-radius:50%;overflow:hidden;margin:0 auto 12px;' })
+      var img = el('img', '', { style: 'width:100%;height:100%;object-fit:cover;' })
+      img.src = char.avatar || ''
+      imgBox.appendChild(img)
+      info.appendChild(imgBox)
+      info.appendChild(el('p', '', { text: char.name || '', style: 'font-size:16px;font-weight:700;color:#1e293b;' }))
+      if (char.handle) info.appendChild(el('p', '', { text: char.handle, style: 'font-size:12px;color:#94a3b8;margin-top:4px;' }))
+      if (char.bio) info.appendChild(el('p', '', { text: char.bio, style: 'font-size:12px;color:#64748b;margin-top:8px;line-height:1.6;' }))
+      body.appendChild(info)
+    }
+    modal.appendChild(body)
+
+    var footer = el('div', 'ph-modal-footer')
+    var okBtn = el('button', '', { text: '关闭', style: 'background:#f1f5f9;color:#64748b;' })
+    okBtn.onclick = function () { overlay.remove() }
+    footer.appendChild(okBtn)
+    modal.appendChild(footer)
+
+    overlay.appendChild(modal)
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove() })
+    root.appendChild(overlay)
+  }
+
+  // ========== 拖拽逻辑 ==========
+  function handlePointerDown(e, id) {
+    if (state.mode !== 'edit') return
+    e.preventDefault()
+    e.stopPropagation()
+
+    var item = state.items.find(function (i) { return i.id === id })
+    if (!item) return
+
+    var stage = document.getElementById('ph-stage')
+    if (!stage) return
+    var rect = stage.getBoundingClientRect()
+
+    state.draggingId = id
+    state.dragStart = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initialX: item.x,
+      initialY: item.y,
+      width: rect.width,
+      height: rect.height,
+    }
+
+    var elem = e.currentTarget
+    state.dragElement = elem
+    elem.setPointerCapture(e.pointerId)
+    elem.classList.add('dragging')
+    elem.style.transition = 'none'
+    elem.style.zIndex = '100'
+    elem.style.willChange = 'left, top'
+
+    state.selectedItemId = id
+    renderEditToolbar()
+    // 重新渲染选中状态
+    document.querySelectorAll('.ph-item').forEach(function (el) {
+      el.classList.remove('selected')
+      var label = el.querySelector('.selected-label')
+      if (label) label.remove()
+    })
+    elem.classList.add('selected')
+    var label = el('div', 'selected-label', { text: '选中' })
+    elem.appendChild(label)
+
+    elem.addEventListener('pointermove', handlePointerMove)
+    elem.addEventListener('pointerup', handlePointerUp)
+    elem.addEventListener('pointercancel', handlePointerUp)
+  }
+
+  function handlePointerMove(e) {
+    if (!state.draggingId || !state.dragStart) return
+    e.preventDefault()
+
+    var ds = state.dragStart
+    var deltaX = e.clientX - ds.startX
+    var deltaY = e.clientY - ds.startY
+
+    var nextX = Math.max(0, Math.min(100, ds.initialX + (deltaX / ds.width) * 100))
+    var nextY = Math.max(0, Math.min(100, ds.initialY + (deltaY / ds.height) * 100))
+
+    state.pendingPos = { x: nextX, y: nextY }
+
+    if (state.dragElement && !state.rafId) {
+      state.rafId = requestAnimationFrame(function () {
+        if (state.dragElement && state.pendingPos) {
+          state.dragElement.style.left = state.pendingPos.x + '%'
+          state.dragElement.style.top = state.pendingPos.y + '%'
+        }
+        state.rafId = null
+      })
+    }
+  }
+
+  function handlePointerUp(e) {
+    if (!state.draggingId) return
+
+    if (state.rafId) {
+      cancelAnimationFrame(state.rafId)
+      state.rafId = null
+    }
+
+    if (state.dragElement) {
+      state.dragElement.classList.remove('dragging')
+      state.dragElement.style.transition = ''
+      state.dragElement.style.zIndex = ''
+      state.dragElement.style.willChange = ''
+      state.dragElement.removeEventListener('pointermove', handlePointerMove)
+      state.dragElement.removeEventListener('pointerup', handlePointerUp)
+      state.dragElement.removeEventListener('pointercancel', handlePointerUp)
+    }
+
+    if (state.pendingPos) {
+      var dragId = state.draggingId
+      state.items = state.items.map(function (item) {
+        if (item.id === dragId) {
+          return Object.assign({}, item, { x: state.pendingPos.x, y: state.pendingPos.y })
+        }
+        return item
+      })
+      saveRoomData()
+    }
+
+    state.draggingId = null
+    state.dragStart = null
+    state.dragElement = null
+    state.pendingPos = null
+
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch (_) {}
+  }
+
+  // ========== 编辑工具栏 ==========
+  function createEditToolbar() {
+    var toolbar = el('div', 'ph-edit-toolbar')
+    if (state.isToolbarCollapsed) toolbar.classList.add('collapsed')
+
+    var handle = el('div', 'ph-toolbar-handle')
+    handle.appendChild(el('div'))
+    handle.onclick = function () {
+      state.isToolbarCollapsed = !state.isToolbarCollapsed
+      toolbar.classList.toggle('collapsed', state.isToolbarCollapsed)
+    }
+    toolbar.appendChild(handle)
+
+    var content = el('div', 'ph-toolbar-content')
+    content.id = 'ph-toolbar-content'
+    toolbar.appendChild(content)
+
+    renderToolbarContent(content)
+    return toolbar
+  }
+
+  function renderEditToolbar() {
+    var content = document.getElementById('ph-toolbar-content')
+    if (!content) return
+    content.innerHTML = ''
+    renderToolbarContent(content)
+  }
+
+  function renderToolbarContent(content) {
+    if (state.selectedItemId) {
+      // 选中物品编辑面板
+      var sel = state.items.find(function (i) { return i.id === state.selectedItemId })
+      if (sel) {
+        content.appendChild(createItemEditor(sel))
+        return
+      }
+    }
+
+    // 默认：快捷操作 + 预设
+    // 快捷按钮行
+    var actions = el('div', 'ph-quick-actions')
+
+    var libBtn = createQuickBtn('#6366f1', '+', '家具库')
+    libBtn.onclick = function () { showLibrary() }
+    actions.appendChild(libBtn)
+
+    var customBtn = createQuickBtn('#a855f7', svgIcon(ICONS.sparkle, 24), '自定义')
+    customBtn.onclick = function () { showCustomModal() }
+    actions.appendChild(customBtn)
+
+    var actorBtn = createQuickBtn('#ec4899', svgIcon(ICONS.camera, 24), '角色信息')
+    actorBtn.onclick = function () { showActorArtModal() }
+    actions.appendChild(actorBtn)
+
+    var wallBtn = createQuickBtn('#e2e8f0', svgIcon(ICONS.image, 24), '换墙纸', '#64748b')
+    wallBtn.onclick = function () { triggerImageUpload('wall') }
+    actions.appendChild(wallBtn)
+
+    var floorBtn = createQuickBtn('#e2e8f0', '🧱', '换地板', '#64748b')
+    floorBtn.onclick = function () { triggerImageUpload('floor') }
+    actions.appendChild(floorBtn)
+
+    content.appendChild(actions)
+
+    // 墙纸预设
+    var wallRow = el('div', 'ph-preset-row')
+    wallRow.appendChild(el('h4', '', { text: '墙面预设' }))
+    var wallList = el('div', 'ph-preset-list')
+    WALLPAPER_PRESETS.forEach(function (wp) {
+      var swatch = el('button', 'ph-preset-swatch')
+      swatch.style.background = wp.value
+      swatch.title = wp.name
+      swatch.onclick = function () {
+        state.wallImage = wp.value
+        var wall = document.getElementById('ph-wall')
+        if (wall) wall.style.background = wp.value
+        saveRoomData()
+        if (rocheApi) rocheApi.ui.toast('墙纸已切换：' + wp.name)
+      }
+      wallList.appendChild(swatch)
+    })
+    wallRow.appendChild(wallList)
+    content.appendChild(wallRow)
+
+    // 地板预设
+    var floorRow = el('div', 'ph-preset-row')
+    floorRow.appendChild(el('h4', '', { text: '地板预设' }))
+    var floorList = el('div', 'ph-preset-list')
+    FLOOR_PRESETS.forEach(function (fp) {
+      var swatch = el('button', 'ph-preset-swatch')
+      swatch.style.background = fp.value
+      swatch.title = fp.name
+      swatch.onclick = function () {
+        state.floorImage = fp.value
+        var floor = document.getElementById('ph-floor')
+        if (floor) floor.style.background = fp.value
+        saveRoomData()
+        if (rocheApi) rocheApi.ui.toast('地板已切换：' + fp.name)
+      }
+      floorList.appendChild(swatch)
+    })
+    floorRow.appendChild(floorList)
+    content.appendChild(floorRow)
+  }
+
+  function createQuickBtn(bgColor, icon, label, textColor) {
+    var btn = el('button', 'ph-quick-btn')
+    var box = el('div', 'icon-box')
+    box.style.background = bgColor
+    if (textColor) box.style.color = textColor
+    box.innerHTML = icon
+    btn.appendChild(box)
+    btn.appendChild(el('span', 'label', { text: label }))
+    return btn
+  }
+
+  // ========== 物品编辑器 ==========
+  function createItemEditor(sel) {
+    var editor = el('div', 'ph-item-editor')
+
+    // 头部
+    var header = el('div', 'ph-editor-header')
+    header.appendChild(el('span', 'title', { text: '调整 · ' + sel.name }))
+    var actions = el('div', 'ph-editor-actions')
+    var dupBtn = el('button', 'dup', { text: '复制' })
+    dupBtn.onclick = function () { duplicateSelectedItem() }
+    var delBtn = el('button', 'del', { text: '删除' })
+    delBtn.onclick = function () { deleteSelectedItem() }
+    actions.appendChild(dupBtn)
+    actions.appendChild(delBtn)
+    header.appendChild(actions)
+    editor.appendChild(header)
+
+    // 滑块 + 十字键
+    var sliderGroup = el('div', 'ph-slider-group')
+    var sliderCol = el('div', 'ph-slider-col')
+
+    // 缩放
+    var scaleRow = el('div', 'ph-slider-row')
+    scaleRow.appendChild(el('label', '', { html: '缩放 <span class="val">' + Math.round(sel.scale * 100) + '%</span>' }))
+    var scaleInput = el('input', '')
+    scaleInput.type = 'range'
+    scaleInput.min = '0.2'
+    scaleInput.max = '6'
+    scaleInput.step = '0.05'
+    scaleInput.value = sel.scale
+    scaleInput.oninput = function () { updateSelectedItem({ scale: parseFloat(scaleInput.value) }) }
+    scaleRow.appendChild(scaleInput)
+    sliderCol.appendChild(scaleRow)
+
+    // 旋转
+    var rotRow = el('div', 'ph-slider-row')
+    rotRow.appendChild(el('label', '', { html: '旋转 <span class="val">' + Math.round(sel.rotation || 0) + '°</span>' }))
+    var rotInput = el('input', '')
+    rotInput.type = 'range'
+    rotInput.min = '-180'
+    rotInput.max = '180'
+    rotInput.step = '1'
+    rotInput.value = sel.rotation || 0
+    rotInput.oninput = function () { updateSelectedItem({ rotation: parseInt(rotInput.value) }) }
+    rotRow.appendChild(rotInput)
+    sliderCol.appendChild(rotRow)
+    sliderGroup.appendChild(sliderCol)
+
+    // 十字键
+    var numpad = el('div', 'ph-numpad')
+    numpad.appendChild(el('span', 'spacer'))
+    numpad.appendChild(makeNudgeBtn('↑', 0, -1))
+    numpad.appendChild(el('span', 'spacer'))
+    numpad.appendChild(makeNudgeBtn('←', -1, 0))
+    numpad.appendChild(el('span', 'spacer', { text: '1%' }))
+    numpad.appendChild(makeNudgeBtn('→', 1, 0))
+    numpad.appendChild(el('span', 'spacer'))
+    numpad.appendChild(makeNudgeBtn('↓', 0, 1))
+    numpad.appendChild(el('span', 'spacer'))
+    sliderGroup.appendChild(numpad)
+    editor.appendChild(sliderGroup)
+
+    // 类型切换
+    var isRug = sel.type === 'rug'
+    var typeRow = el('div', '', { style: 'display:flex;align-items:center;justify-content:space-between;background:#f8fafc;border-radius:12px;padding:8px 12px;border:1px solid #f1f5f9;' })
+    typeRow.appendChild(el('span', '', { text: '图层类型' + (isRug ? '：地毯（垫底）' : ''), style: 'font-size:10px;color:#94a3b8;' }))
+    var typeBtn = el('button', '', { text: isRug ? '改回普通家具' : '设为地毯', style: 'font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;' + (isRug ? 'background:#f3e8ff;color:#a855f7;' : 'background:#e2e8f0;color:#64748b;') })
+    typeBtn.onclick = function () { updateSelectedItem({ type: isRug ? 'furniture' : 'rug' }) }
+    typeRow.appendChild(typeBtn)
+    editor.appendChild(typeRow)
+
+    // 提示
+    editor.appendChild(el('p', '', { text: '小技巧：拖动移动位置，滚轮缩放，滑杆微调', style: 'font-size:9px;color:#cbd5e1;text-align:center;' }))
+
+    return editor
+  }
+
+  function makeNudgeBtn(text, dx, dy) {
+    var btn = el('button', '', { text: text })
+    btn.onclick = function () { nudgeSelectedItem(dx, dy) }
+    return btn
+  }
+
+  function nudgeSelectedItem(dx, dy) {
+    var sel = state.items.find(function (i) { return i.id === state.selectedItemId })
+    if (!sel) return
+    updateSelectedItem({
+      x: Math.max(0, Math.min(100, sel.x + dx)),
+      y: Math.max(0, Math.min(100, sel.y + dy)),
+    })
+  }
+
+  function updateSelectedItem(updates) {
+    if (!state.selectedItemId) return
+    state.items = state.items.map(function (item) {
+      if (item.id === state.selectedItemId) {
+        return Object.assign({}, item, updates)
+      }
+      return item
+    })
+    saveRoomData()
+    // 更新 DOM
+    var elem = document.querySelector('.ph-item[data-id="' + state.selectedItemId + '"]')
+    var sel = state.items.find(function (i) { return i.id === state.selectedItemId })
+    if (elem && sel) {
+      elem.style.left = sel.x + '%'
+      elem.style.top = sel.y + '%'
+      elem.style.width = (80 * sel.scale) + 'px'
+      elem.style.transform = 'translate(-50%, -100%) rotate(' + (sel.rotation || 0) + 'deg)'
+      if (sel.type === 'rug') {
+        elem.style.zIndex = String(1 + Math.floor(sel.y / 10))
+      } else {
+        elem.style.zIndex = String(Math.floor(sel.y))
+      }
+    }
+    // 更新编辑面板
+    renderEditToolbar()
+  }
+
+  function deleteSelectedItem() {
+    if (!state.selectedItemId) return
+    state.items = state.items.filter(function (i) { return i.id !== state.selectedItemId })
+    state.selectedItemId = null
+    saveRoomData()
+    renderRoomPage()
+    if (rocheApi) rocheApi.ui.toast('已删除')
+  }
+
+  function duplicateSelectedItem() {
+    var sel = state.items.find(function (i) { return i.id === state.selectedItemId })
+    if (!sel) return
+    var copy = Object.assign({}, sel, {
+      id: 'item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      x: Math.min(96, sel.x + 4),
+      y: Math.min(100, sel.y + 4),
+    })
+    state.items.push(copy)
+    state.selectedItemId = copy.id
+    saveRoomData()
+    renderRoomPage()
+    if (rocheApi) rocheApi.ui.toast('已复制：' + sel.name)
+  }
+
+  // ========== 家具库弹窗 ==========
+  function showLibrary() {
+    var overlay = el('div', 'ph-modal-overlay')
+    var modal = el('div', 'ph-modal')
+
+    var header = el('div', 'ph-modal-header')
+    header.appendChild(el('h3', '', { text: '家具超市' }))
+    var closeBtn = el('button', 'close', { html: svgIcon(ICONS.close, 22) })
+    closeBtn.onclick = function () { overlay.remove() }
+    header.appendChild(closeBtn)
+    modal.appendChild(header)
+
+    var body = el('div', 'ph-modal-body')
+
+    // 合并预设 + 自定义
+    var allCategories = {}
+    for (var cat in FURNITURE_PRESETS) {
+      allCategories[cat] = FURNITURE_PRESETS[cat]
+    }
+    if (state.customAssets.length > 0) {
+      allCategories.custom = state.customAssets
+    }
+
+    for (var category in allCategories) {
+      var assets = allCategories[category]
+      if (!assets || assets.length === 0) continue
+
+      var section = el('div', 'ph-library-section')
+      var h4 = el('h4', '')
+      h4.appendChild(el('span', '', { text: CATEGORY_LABELS[category] || category }))
+      h4.appendChild(el('span', 'count', { text: String(assets.length) }))
+      section.appendChild(h4)
+
+      var grid = el('div', 'ph-library-grid')
+      assets.forEach(function (asset, i) {
+        var item = el('button', 'ph-library-item')
+        var box = el('div', 'icon-box')
+        if (asset.image && (asset.image.startsWith('http') || asset.image.startsWith('data') || asset.image.startsWith('blob'))) {
+          var img = el('img')
+          img.src = asset.image
+          box.appendChild(img)
+        } else {
+          box.textContent = asset.emoji || asset.image || '📦'
+        }
+        item.appendChild(box)
+        item.appendChild(el('span', 'name', { text: asset.name }))
+        item.onclick = function () {
+          addItem(asset, category)
+        }
+        grid.appendChild(item)
+      })
+      section.appendChild(grid)
+      body.appendChild(section)
+    }
+
+    modal.appendChild(body)
+
+    var footer = el('div', 'ph-modal-footer')
+    var doneBtn = el('button', '', { text: '摆完了，关闭', style: 'background:#6366f1;color:#fff;' })
+    doneBtn.onclick = function () { overlay.remove() }
+    footer.appendChild(doneBtn)
+    modal.appendChild(footer)
+
+    overlay.appendChild(modal)
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove() })
+    root.appendChild(overlay)
+  }
+
+  function addItem(asset, category) {
+    var newItem = {
+      id: 'item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      name: asset.name,
+      type: category === 'rug' || asset.isRug ? 'rug' : (category === 'custom' ? (asset.itemType || 'furniture') : category),
+      image: asset.image && (asset.image.startsWith('http') || asset.image.startsWith('data') || asset.image.startsWith('blob')) ? asset.image : '',
+      emoji: asset.emoji || (asset.image && !asset.image.startsWith('http') ? asset.image : '📦'),
+      x: 44 + Math.random() * 12,
+      y: 46 + Math.random() * 12,
+      scale: asset.defaultScale || 1.0,
+      rotation: 0,
+      isInteractive: true,
+      description: asset.description || '',
+    }
+    state.items.push(newItem)
+    saveRoomData()
+    renderRoomPage()
+    if (rocheApi) rocheApi.ui.toast('已添加：' + asset.name)
+  }
+
+  // ========== 自定义家具弹窗 ==========
+  function showCustomModal() {
+    state.customName = ''
+    state.customUrl = ''
+    state.customEmoji = ''
+    state.customType = 'furniture'
+
+    var overlay = el('div', 'ph-modal-overlay')
+    var modal = el('div', 'ph-modal')
+
+    var header = el('div', 'ph-modal-header')
+    header.appendChild(el('h3', '', { text: '自定义家具' }))
+    var closeBtn = el('button', 'close', { html: svgIcon(ICONS.close, 22) })
+    closeBtn.onclick = function () { overlay.remove() }
+    header.appendChild(closeBtn)
+    modal.appendChild(header)
+
+    var body = el('div', 'ph-modal-body')
+    var form = el('div', 'ph-custom-form')
+
+    var top = el('div', 'ph-custom-top')
+    var uploadBox = el('div', 'ph-upload-box')
+    uploadBox.id = 'ph-upload-box'
+    uploadBox.appendChild(el('span', 'placeholder', { text: '+ 上传' }))
+    top.appendChild(uploadBox)
+
+    var fields = el('div', 'ph-custom-fields')
+
+    var urlGroup = el('div', 'ph-input-group')
+    urlGroup.appendChild(el('label', '', { text: '图片 URL (推荐图床)' }))
+    var urlInput = el('input', '')
+    urlInput.type = 'text'
+    urlInput.placeholder = 'https://...'
+    urlInput.value = state.customUrl
+    urlInput.oninput = function () {
+      state.customUrl = urlInput.value
+      updateUploadPreview(uploadBox, urlInput.value)
+    }
+    urlGroup.appendChild(urlInput)
+    fields.appendChild(urlGroup)
+
+    var nameGroup = el('div', 'ph-input-group')
+    nameGroup.appendChild(el('label', '', { text: '物品名称' }))
+    var nameInput = el('input', '')
+    nameInput.type = 'text'
+    nameInput.placeholder = '例如: 懒人沙发'
+    nameInput.value = state.customName
+    nameInput.oninput = function () { state.customName = nameInput.value }
+    nameGroup.appendChild(nameInput)
+    fields.appendChild(nameGroup)
+
+    var emojiGroup = el('div', 'ph-input-group')
+    emojiGroup.appendChild(el('label', '', { text: 'Emoji 图标 (无图片时使用)' }))
+    var emojiInput = el('input', '')
+    emojiInput.type = 'text'
+    emojiInput.placeholder = '🛋️'
+    emojiInput.value = state.customEmoji
+    emojiInput.oninput = function () { state.customEmoji = emojiInput.value }
+    emojiGroup.appendChild(emojiInput)
+    fields.appendChild(emojiGroup)
+
+    var typeGroup = el('div', 'ph-input-group')
+    typeGroup.appendChild(el('label', '', { text: '物品类型' }))
+    var typeToggle = el('div', 'ph-type-toggle')
+    var furnitureBtn = el('button', 'active', { text: '家具' })
+    var rugBtn = el('button', '', { text: '地毯' })
+    furnitureBtn.onclick = function () {
+      state.customType = 'furniture'
+      furnitureBtn.classList.add('active')
+      rugBtn.classList.remove('active')
+    }
+    rugBtn.onclick = function () {
+      state.customType = 'rug'
+      rugBtn.classList.add('active')
+      furnitureBtn.classList.remove('active')
+    }
+    typeToggle.appendChild(furnitureBtn)
+    typeToggle.appendChild(rugBtn)
+    typeGroup.appendChild(typeToggle)
+    fields.appendChild(typeGroup)
+
+    top.appendChild(fields)
+    form.appendChild(top)
+
+    var descGroup = el('div', 'ph-input-group')
+    descGroup.appendChild(el('label', '', { text: '物品描述' }))
+    var descInput = el('input', '')
+    descInput.type = 'text'
+    descInput.placeholder = '例如: 一个很软的沙发，坐上去就陷进去了。'
+    descInput.oninput = function () { state.customDesc = descInput.value }
+    descGroup.appendChild(descInput)
+    form.appendChild(descGroup)
+
+    body.appendChild(form)
+    modal.appendChild(body)
+
+    var footer = el('div', 'ph-modal-footer')
+    var addBtn = el('button', '', { text: '添加到房间', style: 'background:#a855f7;color:#fff;' })
+    addBtn.onclick = function () { saveCustomItem(overlay) }
+    footer.appendChild(addBtn)
+    modal.appendChild(footer)
+
+    overlay.appendChild(modal)
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove() })
+    root.appendChild(overlay)
+  }
+
+  function updateUploadPreview(box, url) {
+    box.innerHTML = ''
+    if (url && (url.startsWith('http') || url.startsWith('data'))) {
+      var img = el('img')
+      img.src = url
+      img.onerror = function () {
+        box.innerHTML = ''
+        box.appendChild(el('span', 'placeholder', { text: '+ 上传' }))
+      }
+      box.appendChild(img)
+    } else {
+      box.appendChild(el('span', 'placeholder', { text: '+ 上传' }))
+    }
+  }
+
+  function saveCustomItem(overlay) {
+    var name = state.customName.trim()
+    var url = state.customUrl.trim()
+    var emoji = state.customEmoji.trim()
+
+    if (!name) {
+      if (rocheApi) rocheApi.ui.toast('请填写物品名称')
+      return
+    }
+    if (!url && !emoji) {
+      if (rocheApi) rocheApi.ui.toast('请填图片 URL 或 Emoji')
+      return
+    }
+
+    var asset = {
+      id: 'asset_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      name: name,
+      image: url || '',
+      emoji: emoji || '📦',
+      defaultScale: 1.0,
+      itemType: state.customType,
+    }
+    state.customAssets.push(asset)
+    saveCustomAssets()
+
+    // 同时添加到房间
+    addItem(asset, 'custom')
+
+    overlay.remove()
+    if (rocheApi) rocheApi.ui.toast('已添加：' + name)
+  }
+
+  // ========== 图片上传 ==========
+  function triggerImageUpload(target) {
+    var input = el('input', '')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.style.display = 'none'
+    input.onchange = function (e) {
+      var file = e.target.files[0]
+      if (!file) return
+      var reader = new FileReader()
+      reader.onload = function (ev) {
+        var dataUrl = ev.target.result
+        if (target === 'wall') {
+          state.wallImage = 'url(' + dataUrl + ')'
+          var wall = document.getElementById('ph-wall')
+          if (wall) wall.style.background = state.wallImage
+        } else if (target === 'floor') {
+          state.floorImage = 'url(' + dataUrl + ')'
+          var floor = document.getElementById('ph-floor')
+          if (floor) floor.style.background = state.floorImage
+        }
+        saveRoomData()
+        if (rocheApi) rocheApi.ui.toast(target === 'wall' ? '墙纸已更新' : '地板已更新')
+      }
+      reader.readAsDataURL(file)
+    }
+    input.click()
+  }
+
+  // ========== 加载角色列表 ==========
+  async function loadCharacters() {
+    if (!rocheApi) return
+    try {
+      var chars = await rocheApi.character.list()
+      state.characters = chars || []
+    } catch (e) {
+      state.characters = []
+    }
+  }
+
+  // ========== 插件注册 ==========
+  window.RochePlugin = window.RochePlugin || {}
+  window.RochePlugin.register = window.RochePlugin.register || function () {}
+
+  // 使用标准注册方式
+  if (window.RochePlugin && window.RochePlugin.register) {
+    window.RochePlugin.register({
+      id: 'pixel-house',
+      name: '像素小屋',
+      version: '3.0.0',
+      apps: [
+        {
+          id: 'pixel-house-home',
+          name: '像素小屋',
+          icon: 'home',
+          iconImage: '',
+          async mount(container, roche) {
+            rocheApi = roche
+            root = el('div', 'roche-plugin-pixel-house')
+
+            // 注入样式
+            styleEl = el('style')
+            styleEl.textContent = CSS
+            document.head.appendChild(styleEl)
+
+            container.innerHTML = ''
+            container.appendChild(root)
+
+            // 加载角色和自定义素材
+            await loadCharacters()
+            await loadCustomAssets()
+
+            // 渲染选人页
+            renderSelectPage()
+          },
+          async unmount(container, roche) {
+            if (styleEl && styleEl.parentNode) {
+              styleEl.parentNode.removeChild(styleEl)
+              styleEl = null
+            }
+            if (root) {
+              root.innerHTML = ''
+              root = null
+            }
+            container.replaceChildren()
+          },
+        },
+      ],
+    })
+  }
+})()
