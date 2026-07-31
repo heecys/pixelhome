@@ -98,6 +98,7 @@
     customName: '',
     customEmoji: '',
     customUrl: '',
+    customImageData: '', // 上传的图片 dataURL
     customType: 'furniture',
   }
 
@@ -1498,6 +1499,7 @@
     state.customName = ''
     state.customUrl = ''
     state.customEmoji = ''
+    state.customImageData = ''
     state.customType = 'furniture'
 
     var overlay = el('div', 'ph-modal-overlay')
@@ -1517,19 +1519,29 @@
     var uploadBox = el('div', 'ph-upload-box')
     uploadBox.id = 'ph-upload-box'
     uploadBox.appendChild(el('span', 'placeholder', { text: '+ 上传' }))
+
+    // 点击上传框触发文件选择
+    uploadBox.onclick = function () { triggerCustomItemUpload(uploadBox) }
+
     top.appendChild(uploadBox)
 
     var fields = el('div', 'ph-custom-fields')
 
     var urlGroup = el('div', 'ph-input-group')
-    urlGroup.appendChild(el('label', '', { text: '图片 URL (推荐图床)' }))
+    urlGroup.appendChild(el('label', '', { text: '图片 URL (或直接上传)' }))
     var urlInput = el('input', '')
     urlInput.type = 'text'
     urlInput.placeholder = 'https://...'
     urlInput.value = state.customUrl
     urlInput.oninput = function () {
       state.customUrl = urlInput.value
-      updateUploadPreview(uploadBox, urlInput.value)
+      // 输入 URL 时清除上传的图片预览
+      if (urlInput.value.trim()) {
+        state.customImageData = ''
+        updateUploadPreview(uploadBox, urlInput.value)
+      } else {
+        updateUploadPreview(uploadBox, '')
+      }
     }
     urlGroup.appendChild(urlInput)
     fields.appendChild(urlGroup)
@@ -1600,8 +1612,44 @@
     root.appendChild(overlay)
   }
 
+  // 触发自定义家具图片上传
+  function triggerCustomItemUpload(uploadBox) {
+    var input = el('input', '')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.style.display = 'none'
+    input.onchange = function (e) {
+      var file = e.target.files[0]
+      if (!file) return
+      var reader = new FileReader()
+      reader.onload = function (ev) {
+        var dataUrl = ev.target.result
+        state.customImageData = dataUrl
+        state.customUrl = '' // 清除 URL，优先用上传的图
+        // 同步清空 URL 输入框
+        var urlInput = document.querySelector('.ph-custom-fields input[type="text"][placeholder="https://..."]')
+        if (urlInput) urlInput.value = ''
+        // 更新预览
+        uploadBox.innerHTML = ''
+        var img = el('img')
+        img.src = dataUrl
+        uploadBox.appendChild(img)
+        if (rocheApi) rocheApi.ui.toast('图片已上传')
+      }
+      reader.readAsDataURL(file)
+    }
+    input.click()
+  }
+
   function updateUploadPreview(box, url) {
     box.innerHTML = ''
+    // 优先显示上传的图片
+    if (state.customImageData) {
+      var uploadImg = el('img')
+      uploadImg.src = state.customImageData
+      box.appendChild(uploadImg)
+      return
+    }
     if (url && (url.startsWith('http') || url.startsWith('data'))) {
       var img = el('img')
       img.src = url
@@ -1619,20 +1667,25 @@
     var name = state.customName.trim()
     var url = state.customUrl.trim()
     var emoji = state.customEmoji.trim()
+    var uploadImg = state.customImageData
 
     if (!name) {
       if (rocheApi) rocheApi.ui.toast('请填写物品名称')
       return
     }
-    if (!url && !emoji) {
-      if (rocheApi) rocheApi.ui.toast('请填图片 URL 或 Emoji')
+    // 上传图片、URL、Emoji 至少有一个
+    if (!uploadImg && !url && !emoji) {
+      if (rocheApi) rocheApi.ui.toast('请上传图片、填图片 URL 或 Emoji')
       return
     }
+
+    // 优先使用上传的图片
+    var imageSrc = uploadImg || url || ''
 
     var asset = {
       id: 'asset_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
       name: name,
-      image: url || '',
+      image: imageSrc,
       emoji: emoji || '📦',
       defaultScale: 1.0,
       itemType: state.customType,
