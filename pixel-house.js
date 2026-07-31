@@ -1,7 +1,7 @@
 /**
- * 像素小屋 — Roche 插件 v3.0.0
+ * 像素小屋 — Roche 插件 v3.1.0
  * 基于 RoomApp.tsx 设计模式重写的房间装扮系统
- * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传
+ * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传、角色立绘更换
  */
 ;(function () {
   'use strict'
@@ -77,6 +77,7 @@
     view: 'select', // 'select' | 'room'
     mode: 'view', // 'view' | 'edit'
     activeCharId: null,
+    activeCharacter: null,
     characters: [],
     items: [],
     wallImage: '',
@@ -85,6 +86,7 @@
     showLibrary: false,
     showCustomModal: false,
     customAssets: [],
+    customSprites: {}, // { charId: dataUrl } 角色自定义立绘
     isToolbarCollapsed: false,
     // drag
     draggingId: null,
@@ -128,50 +130,50 @@
 .roche-plugin-pixel-house button { cursor: pointer; border: none; background: none; font-family: inherit; }
 .roche-plugin-pixel-house input { font-family: inherit; }
 
-/* ===== 选人页 ===== */
+/* ===== 选人页（黑白风） ===== */
 .ph-select-page {
   height: 100%; width: 100%; display: flex; flex-direction: column;
-  background: linear-gradient(180deg, #efe9f7 0%, #f4eff9 45%, #f7f2fb 100%);
+  background: linear-gradient(180deg, #0a0a0a 0%, #1a1a1a 45%, #222 100%);
   position: relative; overflow: hidden;
 }
 .ph-stars {
-  position: absolute; inset: 0; pointer-events: none; opacity: 0.6;
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
   background-image:
-    radial-gradient(1.5px 1.5px at 14% 16%, rgba(190,160,225,.45), transparent),
-    radial-gradient(1px 1px at 80% 12%, rgba(220,190,235,.5), transparent),
-    radial-gradient(1.5px 1.5px at 42% 28%, rgba(180,200,240,.4), transparent),
-    radial-gradient(1px 1px at 86% 42%, rgba(200,175,230,.4), transparent),
-    radial-gradient(1px 1px at 22% 66%, rgba(210,185,235,.35), transparent),
-    radial-gradient(1px 1px at 66% 80%, rgba(200,210,240,.35), transparent);
+    radial-gradient(1.5px 1.5px at 14% 16%, rgba(255,255,255,.5), transparent),
+    radial-gradient(1px 1px at 80% 12%, rgba(255,255,255,.45), transparent),
+    radial-gradient(1.5px 1.5px at 42% 28%, rgba(200,200,200,.4), transparent),
+    radial-gradient(1px 1px at 86% 42%, rgba(255,255,255,.35), transparent),
+    radial-gradient(1px 1px at 22% 66%, rgba(255,255,255,.3), transparent),
+    radial-gradient(1px 1px at 66% 80%, rgba(200,200,200,.3), transparent);
 }
 .ph-select-header { position: relative; z-index: 2; padding: max(3rem, env(safe-area-inset-top)) 1.5rem 0; text-align: center; }
 .ph-back-btn {
   position: absolute; left: 1rem; top: max(3rem, env(safe-area-inset-top));
-  padding: 8px; border-radius: 50%; color: #a78bca; transition: all .2s;
+  padding: 8px; border-radius: 50%; color: #999; transition: all .2s;
   display: flex; align-items: center; justify-content: center;
 }
 .ph-back-btn:active { transform: scale(0.9); }
 .ph-select-title {
-  font-size: 26px; letter-spacing: 0.15em; color: #6a5790;
-  text-shadow: 0 2px 18px rgba(170,150,220,.4);
+  font-size: 26px; letter-spacing: 0.15em; color: #f5f5f5;
+  text-shadow: 0 2px 18px rgba(255,255,255,.15);
   font-family: 'Noto Serif SC', serif; font-weight: 300;
 }
 .ph-select-subtitle { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; }
-.ph-select-subtitle span.line { height: 1px; width: 40px; background: linear-gradient(90deg, transparent, rgba(150,120,190,.5)); }
-.ph-select-subtitle span.line.r { background: linear-gradient(270deg, transparent, rgba(150,120,190,.5)); }
-.ph-select-subtitle span.text { font-size: 9px; letter-spacing: 0.45em; font-weight: 700; color: rgba(160,130,200,.7); }
-.ph-select-desc { position: relative; z-index: 2; text-align: center; font-size: 11px; margin-top: 16px; padding: 0 2rem; color: rgba(160,130,200,.7); line-height: 1.6; }
+.ph-select-subtitle span.line { height: 1px; width: 40px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.4)); }
+.ph-select-subtitle span.line.r { background: linear-gradient(270deg, transparent, rgba(255,255,255,.4)); }
+.ph-select-subtitle span.text { font-size: 9px; letter-spacing: 0.45em; font-weight: 700; color: rgba(255,255,255,.5); }
+.ph-select-desc { position: relative; z-index: 2; text-align: center; font-size: 11px; margin-top: 16px; padding: 0 2rem; color: rgba(255,255,255,.45); line-height: 1.6; }
 .ph-char-grid { position: relative; z-index: 2; flex: 1; overflow-y: auto; padding: 16px 20px 20px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; align-content: start; }
 .ph-char-grid::-webkit-scrollbar { display: none; }
 .ph-char-card {
   position: relative; border-radius: var(--ph-radius); padding: 32px 12px 20px;
   display: flex; flex-direction: column; align-items: center;
-  transition: all .2s; overflow: hidden; border: 1px solid rgba(170,140,210,.3);
-  box-shadow: 0 8px 22px rgba(150,120,200,.18);
+  transition: all .2s; overflow: hidden; border: 1px solid rgba(255,255,255,.15);
+  box-shadow: 0 8px 22px rgba(0,0,0,.4);
 }
 .ph-char-card:active { transform: scale(0.95); }
-.ph-char-card .inner-frame { position: absolute; inset: 7px; border-radius: 12px; border: 1px solid rgba(170,140,210,.22); pointer-events: none; }
-.ph-char-card .gem { position: absolute; width: 6px; height: 6px; transform: rotate(45deg); background: rgba(190,160,220,.85); }
+.ph-char-card .inner-frame { position: absolute; inset: 7px; border-radius: 12px; border: 1px solid rgba(255,255,255,.1); pointer-events: none; }
+.ph-char-card .gem { position: absolute; width: 6px; height: 6px; transform: rotate(45deg); background: rgba(255,255,255,.6); }
 .ph-char-card .gem.tl { top: 10px; left: 10px; }
 .ph-char-card .gem.tr { top: 10px; right: 10px; }
 .ph-char-card .gem.bl { bottom: 10px; left: 10px; }
@@ -179,23 +181,23 @@
 .ph-avatar-wrap { position: relative; width: 92px; height: 92px; display: flex; align-items: center; justify-content: center; }
 .ph-avatar-compass {
   position: absolute; width: 124px; height: 124px; border-radius: 50%;
-  background: repeating-conic-gradient(from 0deg, rgba(170,140,210,.16) 0deg 2.4deg, transparent 2.4deg 9deg);
+  background: repeating-conic-gradient(from 0deg, rgba(255,255,255,.14) 0deg 2.4deg, transparent 2.4deg 9deg);
   -webkit-mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
   mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
 }
-.ph-avatar-halo { position: absolute; width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle, rgba(200,175,235,.3), transparent 62%); }
-.ph-avatar-ring1 { position: absolute; inset: 8px; border-radius: 50%; border: 1px solid rgba(180,150,215,.5); }
-.ph-avatar-ring2 { position: absolute; inset: 12px; border-radius: 50%; border: 1px solid rgba(180,150,215,.25); }
-.ph-avatar-img { width: 70px; height: 70px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 18px rgba(190,160,235,.4); position: relative; z-index: 1; }
-.ph-avatar-img img { width: 100%; height: 100%; object-fit: cover; }
+.ph-avatar-halo { position: absolute; width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.12), transparent 62%); }
+.ph-avatar-ring1 { position: absolute; inset: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); }
+.ph-avatar-ring2 { position: absolute; inset: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); }
+.ph-avatar-img { width: 70px; height: 70px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 18px rgba(255,255,255,.2); position: relative; z-index: 1; }
+.ph-avatar-img img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(100%) contrast(1.1); }
 .ph-avatar-badge {
   position: absolute; bottom: 0; right: 6px; width: 22px; height: 22px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 5px rgba(120,90,170,.3);
+  background: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.5);
   display: flex; align-items: center; justify-content: center; font-size: 10px; z-index: 2;
 }
-.ph-char-name { margin-top: 12px; font-size: 14px; font-weight: 600; letter-spacing: 0.5px; color: #4a3a6a; font-family: 'Noto Serif SC', serif; }
-.ph-char-sub { margin-top: 2px; font-size: 10px; color: rgba(160,130,200,.7); }
-.ph-empty { text-align: center; font-size: 12px; color: rgba(160,130,200,.6); padding: 64px 0; grid-column: 1 / -1; }
+.ph-char-name { margin-top: 12px; font-size: 14px; font-weight: 600; letter-spacing: 0.5px; color: #f0f0f0; font-family: 'Noto Serif SC', serif; }
+.ph-char-sub { margin-top: 2px; font-size: 10px; color: rgba(255,255,255,.4); }
+.ph-empty { text-align: center; font-size: 12px; color: rgba(255,255,255,.35); padding: 64px 0; grid-column: 1 / -1; }
 
 /* ===== 房间页 ===== */
 .ph-room-page { height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; background: var(--ph-bg); }
@@ -478,6 +480,32 @@
     await rocheApi.storage.set('custom_assets', JSON.stringify(state.customAssets))
   }
 
+  async function loadCustomSprites() {
+    if (!rocheApi) return
+    var data = await rocheApi.storage.get('custom_sprites')
+    if (data) {
+      try {
+        state.customSprites = typeof data === 'string' ? JSON.parse(data) : data
+      } catch (e) {
+        state.customSprites = {}
+      }
+    }
+  }
+
+  async function saveCustomSprites() {
+    if (!rocheApi) return
+    await rocheApi.storage.set('custom_sprites', JSON.stringify(state.customSprites))
+  }
+
+  function getActorImage() {
+    if (!state.activeCharId) return ''
+    // 优先用自定义上传的立绘，否则用角色头像
+    if (state.customSprites[state.activeCharId]) {
+      return state.customSprites[state.activeCharId]
+    }
+    return (state.activeCharacter && state.activeCharacter.avatar) || ''
+  }
+
   // ========== 渲染：选人页 ==========
   function renderSelectPage() {
     root.innerHTML = ''
@@ -508,12 +536,12 @@
     // 角色网格
     var grid = el('div', 'ph-char-grid')
     var tints = [
-      'linear-gradient(180deg,rgba(250,212,228,.85),rgba(242,228,246,.8))',
-      'linear-gradient(180deg,rgba(232,228,248,.85),rgba(242,238,250,.8))',
-      'linear-gradient(180deg,rgba(226,216,246,.85),rgba(238,230,249,.8))',
-      'linear-gradient(180deg,rgba(212,230,247,.85),rgba(234,240,250,.8))',
-      'linear-gradient(180deg,rgba(226,212,245,.85),rgba(238,228,249,.8))',
-      'linear-gradient(180deg,rgba(234,231,242,.88),rgba(242,240,247,.82))',
+      'linear-gradient(180deg,rgba(40,40,40,.9),rgba(20,20,20,.85))',
+      'linear-gradient(180deg,rgba(50,50,50,.88),rgba(25,25,25,.85))',
+      'linear-gradient(180deg,rgba(35,35,35,.9),rgba(18,18,18,.85))',
+      'linear-gradient(180deg,rgba(45,45,45,.88),rgba(22,22,22,.85))',
+      'linear-gradient(180deg,rgba(38,38,38,.9),rgba(20,20,20,.85))',
+      'linear-gradient(180deg,rgba(42,42,42,.88),rgba(24,24,24,.85))',
     ]
 
     if (!state.characters || state.characters.length === 0) {
@@ -544,7 +572,7 @@
 
         var badge = el('div', 'ph-avatar-badge')
         badge.innerHTML = svgIcon('M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75', 14)
-        badge.style.color = '#a78bca'
+        badge.style.color = '#333'
         avatarWrap.appendChild(badge)
         card.appendChild(avatarWrap)
 
@@ -738,9 +766,9 @@
     actor.style.zIndex = '98'
 
     var img = el('img')
-    var avatarUrl = state.activeCharacter.avatar || ''
+    var avatarUrl = getActorImage()
     img.src = avatarUrl
-    img.alt = state.activeCharacter.name || ''
+    img.alt = (state.activeCharacter && state.activeCharacter.name) || ''
     img.onerror = function () {
       this.style.display = 'none'
       var fallback = el('div', 'item-emoji')
@@ -826,7 +854,7 @@
     var modal = el('div', 'ph-modal')
 
     var header = el('div', 'ph-modal-header')
-    header.appendChild(el('h3', '', { text: '角色信息' }))
+    header.appendChild(el('h3', '', { text: '角色立绘' }))
     var closeBtn = el('button', 'close', { html: svgIcon(ICONS.close, 22) })
     closeBtn.onclick = function () { overlay.remove() }
     header.appendChild(closeBtn)
@@ -834,22 +862,87 @@
 
     var body = el('div', 'ph-modal-body')
     var char = state.activeCharacter
+
+    // 立绘预览区
+    var previewBox = el('div', '', {
+      style: 'width:120px;height:120px;margin:0 auto 16px;border-radius:16px;overflow:hidden;background:#f1f5f9;display:flex;align-items:center;justify-content:center;border:2px dashed #cbd5e1;position:relative;'
+    })
+    previewBox.id = 'ph-sprite-preview'
+
+    function refreshPreview() {
+      previewBox.innerHTML = ''
+      var url = getActorImage()
+      if (url) {
+        var img = el('img', '', { style: 'width:100%;height:100%;object-fit:contain;' })
+        img.src = url
+        img.onerror = function () {
+          previewBox.innerHTML = ''
+          previewBox.appendChild(el('span', '', { text: '🧑', style: 'font-size:48px;' }))
+        }
+        previewBox.appendChild(img)
+      } else {
+        previewBox.appendChild(el('span', '', { text: '🧑', style: 'font-size:48px;' }))
+      }
+    }
+    refreshPreview()
+    body.appendChild(previewBox)
+
+    // 角色信息
     if (char) {
-      var info = el('div', '', { style: 'text-align:center;' })
-      var imgBox = el('div', '', { style: 'width:80px;height:80px;border-radius:50%;overflow:hidden;margin:0 auto 12px;' })
-      var img = el('img', '', { style: 'width:100%;height:100%;object-fit:cover;' })
-      img.src = char.avatar || ''
-      imgBox.appendChild(img)
-      info.appendChild(imgBox)
-      info.appendChild(el('p', '', { text: char.name || '', style: 'font-size:16px;font-weight:700;color:#1e293b;' }))
-      if (char.handle) info.appendChild(el('p', '', { text: char.handle, style: 'font-size:12px;color:#94a3b8;margin-top:4px;' }))
-      if (char.bio) info.appendChild(el('p', '', { text: char.bio, style: 'font-size:12px;color:#64748b;margin-top:8px;line-height:1.6;' }))
+      var info = el('div', '', { style: 'text-align:center;margin-bottom:16px;' })
+      info.appendChild(el('p', '', { text: char.name || '', style: 'font-size:15px;font-weight:700;color:#1e293b;' }))
+      if (char.handle) info.appendChild(el('p', '', { text: char.handle, style: 'font-size:12px;color:#94a3b8;margin-top:2px;' }))
       body.appendChild(info)
     }
+
+    // 上传按钮区
+    var uploadRow = el('div', '', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;' })
+
+    // 上传自定义图片
+    var uploadBtn = el('button', '', {
+      style: 'padding:14px;border-radius:14px;border:1px solid #e2e8f0;background:#f8fafc;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s;'
+    })
+    uploadBtn.innerHTML = svgIcon(ICONS.image, 26)
+    uploadBtn.appendChild(el('span', '', { text: '上传立绘', style: 'font-size:12px;font-weight:700;color:#475569;' }))
+    uploadBtn.appendChild(el('span', '', { text: '从设备选择图片', style: 'font-size:10px;color:#94a3b8;' }))
+    uploadBtn.onactive = function () { this.style.transform = 'scale(0.97)' }
+    uploadBtn.onclick = function () { triggerSpriteUpload(refreshPreview) }
+    uploadRow.appendChild(uploadBtn)
+
+    // 使用 URL 链接
+    var urlBtn = el('button', '', {
+      style: 'padding:14px;border-radius:14px;border:1px solid #e2e8f0;background:#f8fafc;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s;'
+    })
+    urlBtn.innerHTML = svgIcon(ICONS.sparkle, 26)
+    urlBtn.appendChild(el('span', '', { text: '图片链接', style: 'font-size:12px;font-weight:700;color:#475569;' }))
+    urlBtn.appendChild(el('span', '', { text: '粘贴图床 URL', style: 'font-size:10px;color:#94a3b8;' }))
+    urlBtn.onclick = function () { showSpriteUrlInput(refreshPreview) }
+    uploadRow.appendChild(urlBtn)
+
+    body.appendChild(uploadRow)
+
+    // 重置按钮（如果有自定义立绘才显示）
+    if (state.activeCharId && state.customSprites[state.activeCharId]) {
+      var resetRow = el('div', '', { style: 'display:flex;gap:8px;' })
+      var resetBtn = el('button', '', {
+        text: '恢复默认头像',
+        style: 'flex:1;padding:10px;border-radius:12px;background:#fef2f2;color:#ef4444;font-size:12px;font-weight:700;border:1px solid #fecaca;'
+      })
+      resetBtn.onclick = function () {
+        delete state.customSprites[state.activeCharId]
+        saveCustomSprites()
+        refreshPreview()
+        refreshActorImg()
+        if (rocheApi) rocheApi.ui.toast('已恢复默认头像')
+      }
+      resetRow.appendChild(resetBtn)
+      body.appendChild(resetRow)
+    }
+
     modal.appendChild(body)
 
     var footer = el('div', 'ph-modal-footer')
-    var okBtn = el('button', '', { text: '关闭', style: 'background:#f1f5f9;color:#64748b;' })
+    var okBtn = el('button', '', { text: '完成', style: 'background:#6366f1;color:#fff;' })
     okBtn.onclick = function () { overlay.remove() }
     footer.appendChild(okBtn)
     modal.appendChild(footer)
@@ -857,6 +950,91 @@
     overlay.appendChild(modal)
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove() })
     root.appendChild(overlay)
+  }
+
+  // 触发立绘图片上传
+  function triggerSpriteUpload(refreshPreview) {
+    var input = el('input', '')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.style.display = 'none'
+    input.onchange = function (e) {
+      var file = e.target.files[0]
+      if (!file) return
+      var reader = new FileReader()
+      reader.onload = function (ev) {
+        var dataUrl = ev.target.result
+        if (state.activeCharId) {
+          state.customSprites[state.activeCharId] = dataUrl
+          saveCustomSprites()
+          refreshPreview()
+          refreshActorImg()
+          if (rocheApi) rocheApi.ui.toast('立绘已更新')
+        }
+      }
+      reader.readAsDataURL(file)
+    }
+    input.click()
+  }
+
+  // URL 输入弹窗
+  function showSpriteUrlInput(refreshPreview) {
+    var urlOverlay = el('div', 'ph-modal-overlay')
+    var urlModal = el('div', 'ph-modal')
+
+    var header = el('div', 'ph-modal-header')
+    header.appendChild(el('h3', '', { text: '粘贴图片链接' }))
+    var closeBtn = el('button', 'close', { html: svgIcon(ICONS.close, 22) })
+    closeBtn.onclick = function () { urlOverlay.remove() }
+    header.appendChild(closeBtn)
+    urlModal.appendChild(header)
+
+    var body = el('div', 'ph-modal-body')
+    var group = el('div', 'ph-input-group')
+    group.appendChild(el('label', '', { text: '图片 URL' }))
+    var input = el('input', '')
+    input.type = 'text'
+    input.placeholder = 'https://...'
+    input.style.cssText = 'width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px;font-size:13px;color:#1e293b;outline:none;'
+    group.appendChild(input)
+    body.appendChild(group)
+    urlModal.appendChild(body)
+
+    var footer = el('div', 'ph-modal-footer')
+    var saveBtn = el('button', '', { text: '确认使用', style: 'background:#6366f1;color:#fff;' })
+    saveBtn.onclick = function () {
+      var url = input.value.trim()
+      if (!url) {
+        if (rocheApi) rocheApi.ui.toast('请输入图片链接')
+        return
+      }
+      if (state.activeCharId) {
+        state.customSprites[state.activeCharId] = url
+        saveCustomSprites()
+        refreshPreview()
+        refreshActorImg()
+        if (rocheApi) rocheApi.ui.toast('立绘已更新')
+      }
+      urlOverlay.remove()
+    }
+    footer.appendChild(saveBtn)
+    urlModal.appendChild(footer)
+
+    urlOverlay.appendChild(urlModal)
+    urlOverlay.addEventListener('click', function (e) { if (e.target === urlOverlay) urlOverlay.remove() })
+    root.appendChild(urlOverlay)
+  }
+
+  // 刷新房间里的角色立绘图
+  function refreshActorImg() {
+    var actor = document.getElementById('ph-actor')
+    if (!actor) return
+    var img = actor.querySelector('img')
+    var newUrl = getActorImage()
+    if (img && newUrl) {
+      img.src = newUrl
+      img.style.display = ''
+    }
   }
 
   // ========== 拖拽逻辑 ==========
@@ -1518,7 +1696,7 @@
     window.RochePlugin.register({
       id: 'pixel-house',
       name: '像素小屋',
-      version: '3.0.0',
+      version: '3.1.0',
       apps: [
         {
           id: 'pixel-house-home',
@@ -1540,6 +1718,7 @@
             // 加载角色和自定义素材
             await loadCharacters()
             await loadCustomAssets()
+            await loadCustomSprites()
 
             // 渲染选人页
             renderSelectPage()
