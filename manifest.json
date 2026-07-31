@@ -4,7 +4,7 @@
   "version": "3.0.0",
   "description": "温馨房间装扮系统：选角色进房间，自由摆放家具、切换墙纸地板、上传自定义素材，支持拖拽缩放旋转",
   "author": "Pixel Artist",
-  "entry": "https://raw.githubusercontent.com/yourname/pixel-house/main/pixel-house.js",
+  "entry": "https://raw.githubusercontent.com/heecys/pixelhome/refs/heads/main/pixel-house.js",
   "hash": "",
   "permissions": [
     "storage",
