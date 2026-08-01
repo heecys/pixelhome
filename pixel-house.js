@@ -1,7 +1,7 @@
 /**
- * 像素小屋 — Roche 插件 v4.1.0
+ * 像素小屋 — Roche 插件 v5.0.0
  * 重构版：宽景房间滑动平移、丰富角色对话系统、可拖动多样式窗户、精致 UI 与流畅交互
- * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传、角色立绘更换
+ * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传、角色立绘更换、AI 家具探索、多房间切换
  */
 ;(function () {
   'use strict'
@@ -126,6 +126,31 @@
     },
   ]
 
+  // ========== 房间类型预设 ==========
+  var ROOM_TYPES = [
+    { id: 'bedroom', name: '卧室', icon: '🛏️', wallIdx: 0, floorIdx: 0 },
+    { id: 'study', name: '书房', icon: '📚', wallIdx: 3, floorIdx: 0 },
+    { id: 'living', name: '客厅', icon: '🛋️', wallIdx: 5, floorIdx: 2 },
+    { id: 'kitchen', name: '厨房', icon: '🍳', wallIdx: 7, floorIdx: 3 },
+  ]
+
+  function getRoomTypeName(roomId) {
+    for (var i = 0; i < ROOM_TYPES.length; i++) {
+      if (ROOM_TYPES[i].id === roomId) return ROOM_TYPES[i].name
+    }
+    return '房间'
+  }
+
+  function getRoomType(roomId) {
+    for (var i = 0; i < ROOM_TYPES.length; i++) {
+      if (ROOM_TYPES[i].id === roomId) return ROOM_TYPES[i]
+    }
+    return ROOM_TYPES[0]
+  }
+
+  // ========== AI 可探索家具关键词 ==========
+  var AI_EXPLORE_KEYWORDS = ['抽屉', '柜', '书架', '箱子', '冰箱', '衣柜', '桌子', '书桌', '沙发', '床', '画', '吉他', '游戏机']
+
   // ========== 对话系统 ==========
   var DIALOGUES = {
     // 点击角色时的日常闲聊（20条）
@@ -190,6 +215,7 @@
     activeCharId: null,
     activeCharacter: null,
     characters: [],
+    currentRoom: 'bedroom', // 当前房间类型
     items: [],
     windows: [], // 窗户列表 { id, styleIdx, x, y }
     wallImage: '',
@@ -231,6 +257,8 @@
     pokeCount: 0,
     lastPokeTime: 0,
     dialogueHistory: [], // 最近用过的对话，避免重复
+    aiCache: {}, // AI 探索缓存 { itemId: { contents: [...], generated: true } }
+    aiLoading: false,
   }
 
   var root = null
@@ -584,6 +612,57 @@
 .ph-observation .header button { color: var(--ph-text-muted); }
 .ph-observation p { font-size: 14px; color: var(--ph-text); line-height: 1.6; }
 
+/* AI 探索 - 加载动画 */
+.ph-ai-loading { border: 2px solid #6366f1; }
+.ph-ai-spinner {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 3px solid #e0e7ff; border-top-color: #6366f1;
+  animation: ph-spin 0.8s linear infinite; flex-shrink: 0;
+}
+@keyframes ph-spin { to { transform: rotate(360deg); } }
+
+/* AI 探索 - 结果卡片 */
+.ph-ai-result { border: 2px solid #a855f7; }
+.ph-ai-result .header span { color: #a855f7; }
+.ph-ai-item-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.ph-ai-item-row {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px;
+  background: linear-gradient(135deg, #faf5ff 0%, #fdf4ff 100%);
+  border-radius: 10px; font-size: 13px; color: #4c1d95; line-height: 1.5;
+  border: 1px solid #f3e8ff; animation: ph-fade-in 0.4s ease;
+}
+.ph-ai-dot { color: #a855f7; font-weight: 700; font-size: 16px; line-height: 1.3; flex-shrink: 0; }
+.ph-ai-refresh {
+  margin-top: 14px; width: 100%; padding: 10px; border-radius: 12px;
+  border: 1px solid #d8b4fe; background: #faf5ff; color: #7c3aed;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+}
+.ph-ai-refresh:active { transform: scale(0.97); background: #f3e8ff; }
+
+/* 房间切换器 */
+.ph-room-switcher {
+  position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 4px; z-index: 100; padding: 4px;
+  background: rgba(255,255,255,0.92); border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08); backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  max-width: calc(100% - 80px); overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.ph-room-switcher::-webkit-scrollbar { display: none; }
+.ph-room-pill {
+  display: flex; align-items: center; gap: 3px; padding: 5px 10px;
+  border-radius: 16px; font-size: 11px; font-weight: 600; color: #94a3b8;
+  border: none; background: transparent; cursor: pointer; transition: all 0.25s;
+  white-space: nowrap; flex-shrink: 0;
+}
+.ph-room-pill .pill-icon { font-size: 14px; }
+.ph-room-pill.active {
+  background: linear-gradient(135deg, #6366f1, #818cf8); color: #fff;
+  box-shadow: 0 2px 6px rgba(99,102,241,0.3);
+}
+.ph-room-pill:not(.active):active { background: #f1f5f9; }
+
 /* 动画 */
 @keyframes ph-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 @keyframes ph-pop-in { from { opacity: 0; transform: translateX(-50%) scale(0.8); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
@@ -629,26 +708,32 @@
   }
 
   function getStorageKey() {
-    return 'room_' + (state.activeCharId || 'default')
+    return 'room_' + (state.activeCharId || 'default') + '_' + (state.currentRoom || 'bedroom')
   }
 
   async function loadRoomData() {
     if (!rocheApi) return
     var data = await rocheApi.storage.get(getStorageKey())
+    var roomType = getRoomType(state.currentRoom)
     if (data) {
       try {
         var parsed = typeof data === 'string' ? JSON.parse(data) : data
         state.items = parsed.items || []
         state.windows = parsed.windows || []
-        state.wallImage = parsed.wallImage || ''
-        state.floorImage = parsed.floorImage || ''
+        // 如果没有保存过墙纸/地板，使用房间类型默认预设
+        state.wallImage = parsed.wallImage || WALLPAPER_PRESETS[roomType.wallIdx].value
+        state.floorImage = parsed.floorImage || FLOOR_PRESETS[roomType.floorIdx].value
       } catch (e) {
         state.items = []
         state.windows = []
+        state.wallImage = WALLPAPER_PRESETS[roomType.wallIdx].value
+        state.floorImage = FLOOR_PRESETS[roomType.floorIdx].value
       }
     } else {
       state.items = []
       state.windows = []
+      state.wallImage = WALLPAPER_PRESETS[roomType.wallIdx].value
+      state.floorImage = FLOOR_PRESETS[roomType.floorIdx].value
     }
   }
 
@@ -761,12 +846,14 @@
     state.activeCharacter = character
     state.view = 'room'
     state.mode = 'view'
+    state.currentRoom = 'bedroom'
     state.selectedItemId = null
     state.selectedWindowId = null
     state.isToolbarCollapsed = false
     state.panX = 0
     state.pokeCount = 0
     state.dialogueHistory = []
+    state.aiCache = {} // 清空 AI 缓存
     await loadRoomData()
     renderRoomPage()
     // 进入房间后显示问候对话
@@ -774,6 +861,32 @@
       var greeting = pickDialogue('greeting')
       showBubble(greeting)
     }, 800)
+  }
+
+  // ========== 切换房间 ==========
+  async function switchRoom(roomId) {
+    if (state.currentRoom === roomId) return
+    // 保存当前房间数据
+    await saveRoomData()
+    // 清空 AI 缓存和选中状态
+    state.aiCache = {}
+    state.aiLoading = false
+    state.selectedItemId = null
+    state.selectedWindowId = null
+    state.panX = 0
+    state.pokeCount = 0
+    state.dialogueHistory = []
+    // 切换房间
+    state.currentRoom = roomId
+    // 加载新房间数据
+    await loadRoomData()
+    renderRoomPage()
+    if (rocheApi) rocheApi.ui.toast('已切换到' + getRoomTypeName(roomId))
+    // 角色问候
+    setTimeout(function () {
+      var greeting = pickDialogue('greeting')
+      showBubble(greeting)
+    }, 600)
   }
 
   // ========== 渲染：房间页 ==========
@@ -890,7 +1003,7 @@
       var charName = state.activeCharacter.handle || state.activeCharacter.name || ''
       var label = el('div', 'ph-char-label')
       label.appendChild(el('span', 'dot'))
-      label.appendChild(el('span', '', { text: charName + ' 的房间' }))
+      label.appendChild(el('span', '', { text: charName + ' · ' + getRoomTypeName(state.currentRoom) }))
       topBar.appendChild(label)
     }
 
@@ -923,6 +1036,18 @@
     topRight.appendChild(modeBtn)
     topBar.appendChild(topRight)
     page.appendChild(topBar)
+
+    // 房间切换器
+    var switcher = el('div', 'ph-room-switcher')
+    ROOM_TYPES.forEach(function (rt) {
+      var pill = el('button', 'ph-room-pill')
+      if (rt.id === state.currentRoom) pill.classList.add('active')
+      pill.appendChild(el('span', 'pill-icon', { text: rt.icon }))
+      pill.appendChild(el('span', '', { text: rt.name }))
+      pill.onclick = function () { switchRoom(rt.id) }
+      switcher.appendChild(pill)
+    })
+    page.appendChild(switcher)
 
     if (state.mode === 'edit') {
       page.appendChild(createEditToolbar())
@@ -1234,6 +1359,15 @@
     showBubble(dialogue)
   }
 
+  // 检查家具是否支持 AI 探索
+  function isAIExplorable(item) {
+    var name = item.name || ''
+    for (var i = 0; i < AI_EXPLORE_KEYWORDS.length; i++) {
+      if (name.indexOf(AI_EXPLORE_KEYWORDS[i]) !== -1) return true
+    }
+    return false
+  }
+
   // 观察家具
   function lookAtItem(item) {
     var actor = document.getElementById('ph-actor')
@@ -1244,13 +1378,188 @@
       actor.classList.add('walking')
       setTimeout(function () { actor.classList.remove('walking') }, 600)
 
-      // 摄像机跟随角色
       setTimeout(function () { ensureActorVisible(item.x) }, 100)
     }
+
+    // 如果是 AI 可探索家具，走 AI 逻辑
+    if (isAIExplorable(item)) {
+      exploreItemWithAI(item)
+      return
+    }
+
+    // 普通家具：显示描述 + 角色反应
     var desc = item.description || (item.name + '静静地摆放在那里。')
     showObservation(desc)
     var reaction = pickDialogue('observe')
     setTimeout(function () { showBubble(reaction) }, 700)
+  }
+
+  // ========== AI 家具探索 ==========
+  async function exploreItemWithAI(item) {
+    // 如果已有缓存，直接展示
+    if (state.aiCache[item.id] && state.aiCache[item.id].generated) {
+      showAIExplorationCard(item, state.aiCache[item.id])
+      return
+    }
+
+    // 显示加载状态
+    showAILoading(item)
+
+    try {
+      // 获取角色人设
+      var char = state.activeCharacter
+      var personaText = ''
+      if (char) {
+        // 尝试获取完整角色信息（包含 persona）
+        var fullChar = null
+        try {
+          fullChar = await rocheApi.character.get(char.id)
+        } catch (e) {
+          fullChar = char
+        }
+        personaText = (fullChar && (fullChar.persona || fullChar.bio)) || char.bio || ''
+      }
+
+      var charName = (char && (char.handle || char.name)) || '角色'
+
+      // 构建 AI prompt
+      var roomName = getRoomTypeName(state.currentRoom)
+      var prompt = '你正在扮演"' + charName + '"，一个住在' + roomName + '里的人。'
+      if (personaText) {
+        prompt += '\n\n你的人设描述如下：\n' + personaText.substring(0, 800)
+      }
+      prompt += '\n\n玩家点击了你房间里的"' + item.name + '"，想要翻看里面有什么东西。'
+      prompt += '请根据你的人设性格和喜好，生成3-5个符合你身份的、有意思的小物件。'
+      prompt += '每件物品用简短的一句话描述（15-30字），体现你的个性和生活痕迹。'
+      prompt += '请用JSON数组格式返回，例如：["一本翻了一半的小说，书签是片干枯的树叶","三张过期的电影票根"]。只返回JSON数组，不要其他内容。'
+
+      var result = await rocheApi.ai.chat({
+        messages: [
+          { role: 'system', content: '你是一个创意写作助手，擅长根据角色人设生成符合其性格的物品描述。只返回纯JSON数组，不要markdown格式，不要多余文字。' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.85,
+      })
+
+      var text = result.text || ''
+      // 解析 AI 返回的 JSON 数组
+      var contents = parseAIContents(text)
+
+      // 缓存结果
+      state.aiCache[item.id] = { contents: contents, generated: true, itemName: item.name }
+
+      // 关闭加载状态，展示结果
+      hideAILoading()
+      showAIExplorationCard(item, state.aiCache[item.id])
+
+      // 角色反应
+      var reaction = pickDialogue('observe')
+      setTimeout(function () { showBubble(reaction) }, 500)
+
+    } catch (err) {
+      hideAILoading()
+      // 降级为普通观察
+      var fallbackDesc = item.description || (item.name + '里好像有些东西，但一时说不清楚...')
+      showObservation(fallbackDesc)
+      if (rocheApi) rocheApi.ui.toast('AI 生成失败，请稍后再试')
+    }
+  }
+
+  // 解析 AI 返回的内容
+  function parseAIContents(text) {
+    try {
+      // 去除可能的 markdown 标记
+      text = text.replace(/```json/g, '').replace(/```/g, '').trim()
+      var parsed = JSON.parse(text)
+      if (Array.isArray(parsed)) {
+        return parsed.slice(0, 6).map(function (s) {
+          return typeof s === 'string' ? s : String(s)
+        })
+      }
+    } catch (e) {
+      // 尝试提取方括号内的内容
+      var match = text.match(/\[[\s\S]*\]/)
+      if (match) {
+        try {
+          var arr = JSON.parse(match[0])
+          if (Array.isArray(arr)) return arr.slice(0, 6)
+        } catch (e2) {}
+      }
+    }
+    // 降级：按行分割
+    var lines = text.split('\n').filter(function (l) {
+      return l.trim() && !l.trim().startsWith('[') && !l.trim().startsWith(']')
+    }).map(function (l) {
+      return l.replace(/^[\d\-*.•\s]+/, '').replace(/^["']|["']$/g, '').trim()
+    }).filter(function (l) { return l.length > 2 })
+    return lines.slice(0, 5)
+  }
+
+  // AI 加载动画
+  function showAILoading(item) {
+    state.aiLoading = true
+    hideAILoading()
+    var card = el('div', 'ph-observation ph-ai-loading')
+    card.id = 'ph-ai-loading'
+    var header = el('div', 'header')
+    header.appendChild(el('span', '', { text: '🔍 翻找 ' + item.name }))
+    var closeBtn = el('button', '', { html: svgIcon(ICONS.close, 18) })
+    closeBtn.onclick = function () { hideAILoading(); state.aiLoading = false }
+    header.appendChild(closeBtn)
+    card.appendChild(header)
+
+    var body = el('div', '', { style: 'display:flex;align-items:center;gap:12px;padding:8px 0;' })
+    var spinner = el('div', 'ph-ai-spinner')
+    body.appendChild(spinner)
+    body.appendChild(el('p', '', { text: charName() + ' 正在翻找' + item.name + '里的东西...', style: 'font-size:13px;color:#64748b;' }))
+    card.appendChild(body)
+
+    root.querySelector('.ph-room-page').appendChild(card)
+  }
+
+  function hideAILoading() {
+    var existing = document.getElementById('ph-ai-loading')
+    if (existing) existing.remove()
+  }
+
+  function charName() {
+    if (state.activeCharacter) return state.activeCharacter.handle || state.activeCharacter.name || '角色'
+    return '角色'
+  }
+
+  // AI 探索结果卡片
+  function showAIExplorationCard(item, aiData) {
+    var existing = document.querySelector('.ph-observation')
+    if (existing) existing.remove()
+
+    var card = el('div', 'ph-observation ph-ai-result')
+    var header = el('div', 'header')
+    header.appendChild(el('span', '', { text: '🔍 ' + item.name + ' 里有...' }))
+    var closeBtn = el('button', '', { html: svgIcon(ICONS.close, 18) })
+    closeBtn.onclick = function () { card.remove() }
+    header.appendChild(closeBtn)
+    card.appendChild(header)
+
+    var list = el('div', 'ph-ai-item-list')
+    aiData.contents.forEach(function (content) {
+      var row = el('div', 'ph-ai-item-row')
+      row.appendChild(el('span', 'ph-ai-dot', { text: '•' }))
+      row.appendChild(el('span', '', { text: content }))
+      list.appendChild(row)
+    })
+    card.appendChild(list)
+
+    // 刷新按钮
+    var refreshBtn = el('button', 'ph-ai-refresh', { text: '🔄 重新翻找' })
+    refreshBtn.onclick = function () {
+      card.remove()
+      delete state.aiCache[item.id]
+      exploreItemWithAI(item)
+    }
+    card.appendChild(refreshBtn)
+
+    root.querySelector('.ph-room-page').appendChild(card)
+    setTimeout(function () { if (card.parentNode) card.remove() }, 15000)
   }
 
   function showBubble(text) {
