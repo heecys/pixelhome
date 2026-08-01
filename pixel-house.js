@@ -1,7 +1,7 @@
 /**
- * 像素小屋 — Roche 插件 v5.0.0
+ * 像素小屋 — Roche 插件 v5.1.0
  * 重构版：宽景房间滑动平移、丰富角色对话系统、可拖动多样式窗户、精致 UI 与流畅交互
- * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传、角色立绘更换、AI 家具探索、多房间切换
+ * 功能：角色选择、房间装修、家具拖拽缩放旋转、图层切换、墙纸地板切换、自定义素材上传、角色立绘更换、AI 家具探索、多房间切换、日夜模式、点击地面移动角色
  */
 ;(function () {
   'use strict'
@@ -259,6 +259,7 @@
     dialogueHistory: [], // 最近用过的对话，避免重复
     aiCache: {}, // AI 探索缓存 { itemId: { contents: [...], generated: true } }
     aiLoading: false,
+    isNight: false, // 夜间模式
   }
 
   var root = null
@@ -427,7 +428,7 @@
 }
 @keyframes ph-idle-breath { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.01); } }
 .ph-actor img { width: 100%; height: 100%; object-fit: contain; }
-.ph-actor.walking { animation: ph-walk-bounce 0.4s ease-in-out infinite; }
+.ph-actor.walking { animation: ph-walk-bounce 0.4s ease-in-out infinite; transition: left 0.7s ease-in-out, top 0.5s ease-in-out; }
 @keyframes ph-walk-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 .ph-actor .bubble {
   position: absolute; bottom: 105%; left: 50%; transform: translateX(-50%);
@@ -663,6 +664,33 @@
 }
 .ph-room-pill:not(.active):active { background: #f1f5f9; }
 
+/* 夜间模式 */
+.ph-room-page.night .ph-stage { filter: brightness(0.55) saturate(0.7); }
+.ph-room-page.night .ph-top-bar,
+.ph-room-page.night .ph-room-switcher,
+.ph-room-page.night .ph-char-label { filter: none; }
+.ph-night-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(to bottom, rgba(15,23,42,0.45) 0%, rgba(30,27,75,0.35) 40%, rgba(15,23,42,0.15) 65%, transparent 100%);
+  pointer-events: none; z-index: 50; animation: ph-fade-in 0.5s ease;
+}
+.ph-night-stars { position: absolute; top: 0; left: 0; right: 0; height: 50%; pointer-events: none; z-index: 51; overflow: hidden; }
+.ph-night-stars span {
+  position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 4px #fff; animation: ph-twinkle 2s ease-in-out infinite;
+}
+@keyframes ph-twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+.ph-night-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  font-size: 18px; cursor: pointer; transition: all 0.3s; flex-shrink: 0;
+  background: linear-gradient(135deg, #fef3c7, #fde68a); color: #92400e;
+}
+.ph-room-page.night .ph-night-toggle {
+  background: linear-gradient(135deg, #312e81, #1e1b4b); color: #c7d2fe;
+}
+.ph-night-toggle:active { transform: scale(0.9); }
+
 /* 动画 */
 @keyframes ph-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 @keyframes ph-pop-in { from { opacity: 0; transform: translateX(-50%) scale(0.8); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
@@ -723,17 +751,20 @@
         // 如果没有保存过墙纸/地板，使用房间类型默认预设
         state.wallImage = parsed.wallImage || WALLPAPER_PRESETS[roomType.wallIdx].value
         state.floorImage = parsed.floorImage || FLOOR_PRESETS[roomType.floorIdx].value
+        state.isNight = !!parsed.isNight
       } catch (e) {
         state.items = []
         state.windows = []
         state.wallImage = WALLPAPER_PRESETS[roomType.wallIdx].value
         state.floorImage = FLOOR_PRESETS[roomType.floorIdx].value
+        state.isNight = false
       }
     } else {
       state.items = []
       state.windows = []
       state.wallImage = WALLPAPER_PRESETS[roomType.wallIdx].value
       state.floorImage = FLOOR_PRESETS[roomType.floorIdx].value
+      state.isNight = false
     }
   }
 
@@ -744,6 +775,7 @@
       windows: state.windows,
       wallImage: state.wallImage,
       floorImage: state.floorImage,
+      isNight: state.isNight,
     }
     await rocheApi.storage.set(getStorageKey(), JSON.stringify(data))
   }
@@ -894,6 +926,7 @@
     root.innerHTML = ''
 
     var page = el('div', 'ph-room-page')
+    if (state.isNight) page.classList.add('night')
 
     // 舞台（视口）
     var stage = el('div', 'ph-stage')
@@ -959,6 +992,21 @@
 
     stage.appendChild(world)
 
+    // 夜间遮罩 + 星星
+    if (state.isNight) {
+      var nightOverlay = el('div', 'ph-night-overlay')
+      var stars = el('div', 'ph-night-stars')
+      for (var s = 0; s < 20; s++) {
+        var star = el('span')
+        star.style.left = (Math.random() * 100) + '%'
+        star.style.top = (Math.random() * 100) + '%'
+        star.style.animationDelay = (Math.random() * 2) + 's'
+        stars.appendChild(star)
+      }
+      stage.appendChild(nightOverlay)
+      stage.appendChild(stars)
+    }
+
     // 滑动指示器
     var indicator = el('div', 'ph-pan-indicator')
     indicator.id = 'ph-pan-indicator'
@@ -967,7 +1015,7 @@
     indicator.appendChild(fill)
     stage.appendChild(indicator)
 
-    var hint = el('div', 'ph-pan-hint', { text: '◀ 左右滑动房间 ▶' })
+    var hint = el('div', 'ph-pan-hint', { text: '◀ 滑动房间 · 点击地面移动角色 ▶' })
     hint.id = 'ph-pan-hint'
     stage.appendChild(hint)
 
@@ -1034,6 +1082,17 @@
       renderRoomPage()
     }
     topRight.appendChild(modeBtn)
+
+    // 日夜切换按钮
+    var nightBtn = el('button', 'ph-night-toggle', { text: state.isNight ? '🌙' : '☀️' })
+    nightBtn.title = state.isNight ? '切换到白天' : '切换到夜晚'
+    nightBtn.onclick = function () {
+      state.isNight = !state.isNight
+      saveRoomData()
+      renderRoomPage()
+    }
+    topRight.appendChild(nightBtn)
+
     topBar.appendChild(topRight)
     page.appendChild(topBar)
 
@@ -1070,9 +1129,9 @@
     div.style.transform = 'translate(-50%, -100%) rotate(' + (item.rotation || 0) + 'deg)'
 
     if (item.type === 'rug') {
-      div.style.zIndex = String(1 + Math.floor(item.y / 10))
+      div.style.zIndex = String(1 + Math.floor(item.y / 10) + (item.layerOffset || 0))
     } else {
-      div.style.zIndex = String(Math.floor(item.y))
+      div.style.zIndex = String(Math.floor(item.y) + (item.layerOffset || 0) * 200)
     }
 
     if (item.image && (item.image.startsWith('http') || item.image.startsWith('data') || item.image.startsWith('blob'))) {
@@ -1633,6 +1692,7 @@
     state.isPanning = true
     state.panPointer = {
       startX: e.clientX,
+      startY: e.clientY,
       startPanX: state.panX,
       lastX: e.clientX,
       lastTime: Date.now(),
@@ -1682,7 +1742,7 @@
 
     if (!pp) return
 
-    // 如果几乎没移动，当作点击（编辑模式下取消选中）
+    // 如果几乎没移动，当作点击
     if (!pp.moved) {
       if (state.mode === 'edit' && (state.selectedItemId || state.selectedWindowId)) {
         state.selectedItemId = null
@@ -1690,6 +1750,9 @@
         renderEditToolbar()
         refreshItemSelection()
         refreshWindowSelection()
+      } else if (state.mode === 'view') {
+        // 浏览模式：点击地面移动角色
+        moveActorToClick(pp.startX, pp.startY)
       }
       state.panPointer = null
       return
@@ -1781,6 +1844,53 @@
       hint.style.opacity = '0'
       hint.style.transition = 'opacity .5s'
     }
+  }
+
+  // 点击地面移动角色
+  function moveActorToClick(clientX, clientY) {
+    var stage = document.getElementById('ph-stage')
+    var world = document.getElementById('ph-room-world')
+    var actor = document.getElementById('ph-actor')
+    if (!stage || !world || !actor) return
+
+    var rect = stage.getBoundingClientRect()
+    // 点击位置相对于 stage 的坐标
+    var clickX = clientX - rect.left
+    var clickY = clientY - rect.top
+
+    // 转换为世界坐标（考虑 panX 偏移）
+    var worldX = clickX - state.panX
+    var worldW = world.offsetWidth
+    var percentX = (worldX / worldW) * 100
+
+    // Y 坐标：限制在地面上
+    var percentY = (clickY / stage.offsetHeight) * 100
+    percentY = Math.max(FLOOR_HORIZON, Math.min(92, percentY))
+
+    // 限制 X 在合理范围
+    percentX = Math.max(2, Math.min(98, percentX))
+
+    // 触发行走动画
+    actor.classList.add('walking')
+    actor.style.left = percentX + '%'
+    actor.style.top = percentY + '%'
+
+    // 摄像机跟随
+    setTimeout(function () { ensureActorVisible(percentX) }, 100)
+
+    // 行走结束后显示对话
+    setTimeout(function () {
+      actor.classList.remove('walking')
+      var tapMsgs = [
+        '好嘞，过来了～',
+        '嗯？叫我过去吗？',
+        '来啦来啦',
+        '这就过去',
+        '好，我走过去',
+        '诶，去那边干嘛？',
+      ]
+      showBubble(tapMsgs[Math.floor(Math.random() * tapMsgs.length)])
+    }, 750)
   }
 
   // 摄像机跟随：确保角色在可视区域内
@@ -2411,6 +2521,30 @@
     typeRow.appendChild(typeBtn)
     editor.appendChild(typeRow)
 
+    // 图层切换
+    var layerRow = el('div', '', { style: 'display:flex;align-items:center;justify-content:space-between;gap:8px;background:#f8fafc;border-radius:12px;padding:8px 12px;border:1px solid #f1f5f9;' })
+    var currentLayer = sel.layerOffset || 0
+    var layerLabel = currentLayer > 0 ? '置顶层' : (currentLayer < 0 ? '置底层' : '默认层')
+    layerRow.appendChild(el('span', '', { text: '图层顺序：' + layerLabel, style: 'font-size:10px;color:#94a3b8;' }))
+    var layerBtns = el('div', '', { style: 'display:flex;gap:6px;' })
+    var upBtn = el('button', '', { text: '⬆ 上移', style: 'font-size:11px;font-weight:700;padding:4px 10px;border-radius:16px;background:#e0e7ff;color:#4f46e5;border:none;cursor:pointer;' })
+    upBtn.onclick = function () {
+      var newOffset = Math.min(5, (sel.layerOffset || 0) + 1)
+      updateSelectedItem({ layerOffset: newOffset })
+    }
+    var downBtn = el('button', '', { text: '⬇ 下移', style: 'font-size:11px;font-weight:700;padding:4px 10px;border-radius:16px;background:#fef3c7;color:#92400e;border:none;cursor:pointer;' })
+    downBtn.onclick = function () {
+      var newOffset = Math.max(-5, (sel.layerOffset || 0) - 1)
+      updateSelectedItem({ layerOffset: newOffset })
+    }
+    var resetBtn = el('button', '', { text: '重置', style: 'font-size:11px;font-weight:700;padding:4px 10px;border-radius:16px;background:#f1f5f9;color:#64748b;border:none;cursor:pointer;' })
+    resetBtn.onclick = function () { updateSelectedItem({ layerOffset: 0 }) }
+    layerBtns.appendChild(downBtn)
+    layerBtns.appendChild(resetBtn)
+    layerBtns.appendChild(upBtn)
+    layerRow.appendChild(layerBtns)
+    editor.appendChild(layerRow)
+
     editor.appendChild(el('p', '', { text: '小技巧：拖动移动位置，滚轮缩放，滑杆微调，左右滑动查看宽景房间', style: 'font-size:9px;color:#cbd5e1;text-align:center;' }))
 
     return editor
@@ -2448,9 +2582,9 @@
       elem.style.width = (80 * sel.scale) + 'px'
       elem.style.transform = 'translate(-50%, -100%) rotate(' + (sel.rotation || 0) + 'deg)'
       if (sel.type === 'rug') {
-        elem.style.zIndex = String(1 + Math.floor(sel.y / 10))
+        elem.style.zIndex = String(1 + Math.floor(sel.y / 10) + (sel.layerOffset || 0))
       } else {
-        elem.style.zIndex = String(Math.floor(sel.y))
+        elem.style.zIndex = String(Math.floor(sel.y) + (sel.layerOffset || 0) * 200)
       }
     }
     renderEditToolbar()
