@@ -1,13 +1,14 @@
 /**
- * 像素小屋 — Roche 插件 v3.1.0
- * 基于 RoomApp.tsx 设计模式重写的房间装扮系统
+ * 像素小屋 — Roche 插件 v4.0.0
+ * 重构版：宽景房间滑动平移、丰富角色对话系统、精致 UI 与流畅交互
  * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传、角色立绘更换
  */
 ;(function () {
   'use strict'
 
   // ========== 常量 ==========
-  var FLOOR_HORIZON = 65 // 地板从 65% 处开始
+  var ROOM_WIDTH_RATIO = 2.4 // 房间宽度是视口的 2.4 倍，支持横向滑动
+  var FLOOR_HORIZON = 65     // 地板从 65% 处开始
 
   var WALLPAPER_PRESETS = [
     { name: '温馨暖白', value: 'radial-gradient(circle at 50% 50%, #fdfbf7 0%, #e2e8f0 100%)' },
@@ -29,7 +30,6 @@
     { name: '大理石', value: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 50%, #cbd5e1 100%)' },
   ]
 
-  // 家具预设 — 使用 emoji 作为视觉，用户可上传图片替换
   var FURNITURE_PRESETS = {
     furniture: [
       { name: '床', emoji: '🛏️', defaultScale: 1.6 },
@@ -72,10 +72,67 @@
     custom: '自定义',
   }
 
+  // ========== 对话系统 ==========
+  var DIALOGUES = {
+    // 点击角色时的日常闲聊（20条）
+    tap: [
+      '嗯？叫我了吗？',
+      '今天也待在家里呢...',
+      '窗外的天气不错呢',
+      '要不要一起喝杯茶？',
+      '这个房间我花了好久才布置好',
+      '嗯...在想事情',
+      '你来得正好',
+      '刚才在发呆，被你吓了一跳',
+      '这里的每样东西都是我精心挑的',
+      '有点困了...但不舍得睡',
+      '闻到什么香味了吗？',
+      '今天想做点什么呢？',
+      '房间有点乱，别介意啊',
+      '这个角落是我最喜欢的地方',
+      '嘘——猫好像睡着了',
+      '我刚刚在听一首很好听的歌',
+      '你要不要坐会儿？',
+      '时间过得好快啊...',
+      '这个灯的光线很温柔吧？',
+      '总觉得还缺点什么装饰...',
+    ],
+    // 连续点击/戳角色时的反应（8条）
+    poke: [
+      '别戳啦！',
+      '好痒......',
+      '再戳我要生气了哦？',
+      '嗯嗯嗯？怎么啦！',
+      '你很烦诶...(小声)',
+      '停一下！我在想事情',
+      '哈...你今天怎么这么黏人',
+      '好啦好啦，我在呢',
+    ],
+    // 观察家具时的反应（8条）
+    observe: [
+      '嗯，这个啊...',
+      '那是我的宝贝',
+      '哼，没什么特别的',
+      '你喜欢这个吗？',
+      '这个可有故事了',
+      '摆在那里挺久了吧',
+      '嗯...看着它就想起一些事',
+      '特意放在这个位置的',
+    ],
+    // 进入房间时的问候（5条）
+    greeting: [
+      '你来了！快进来坐',
+      '呀，是你啊',
+      '门没锁，进来吧',
+      '等你好一会儿了',
+      '刚好在想你呢',
+    ],
+  }
+
   // ========== 状态 ==========
   var state = {
-    view: 'select', // 'select' | 'room'
-    mode: 'view', // 'view' | 'edit'
+    view: 'select',
+    mode: 'view',
     activeCharId: null,
     activeCharacter: null,
     characters: [],
@@ -86,7 +143,7 @@
     showLibrary: false,
     showCustomModal: false,
     customAssets: [],
-    customSprites: {}, // { charId: dataUrl } 角色自定义立绘
+    customSprites: {},
     isToolbarCollapsed: false,
     // drag
     draggingId: null,
@@ -98,8 +155,21 @@
     customName: '',
     customEmoji: '',
     customUrl: '',
-    customImageData: '', // 上传的图片 dataURL
+    customImageData: '',
     customType: 'furniture',
+    // 房间滑动
+    panX: 0,
+    minPanX: 0,
+    isPanning: false,
+    panPointer: null,
+    panRAF: null,
+    panVelocity: 0,
+    // 对话
+    lastDialogueIdx: -1,
+    lastDialogueCategory: '',
+    pokeCount: 0,
+    lastPokeTime: 0,
+    dialogueHistory: [], // 最近用过的对话，避免重复
   }
 
   var root = null
@@ -136,6 +206,7 @@
   height: 100%; width: 100%; display: flex; flex-direction: column;
   background: linear-gradient(180deg, #0a0a0a 0%, #1a1a1a 45%, #222 100%);
   position: relative; overflow: hidden;
+  animation: ph-fade-in .4s ease;
 }
 .ph-stars {
   position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
@@ -146,8 +217,11 @@
     radial-gradient(1px 1px at 86% 42%, rgba(255,255,255,.35), transparent),
     radial-gradient(1px 1px at 22% 66%, rgba(255,255,255,.3), transparent),
     radial-gradient(1px 1px at 66% 80%, rgba(200,200,200,.3), transparent);
+  animation: ph-twinkle 4s ease-in-out infinite alternate;
 }
-.ph-select-header { position: relative; z-index: 2; padding: max(3rem, env(safe-area-inset-top)) 1.5rem 0; text-align: center; }
+@keyframes ph-twinkle { from { opacity: 0.3; } to { opacity: 0.6; } }
+.ph-select-header { position: relative; z-index: 2; padding: max(3rem, env(safe-area-inset-top)) 1.5rem 0; text-align: center; animation: ph-slide-down .5s ease; }
+@keyframes ph-slide-down { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
 .ph-back-btn {
   position: absolute; left: 1rem; top: max(3rem, env(safe-area-inset-top));
   padding: 8px; border-radius: 50%; color: #999; transition: all .2s;
@@ -169,9 +243,11 @@
 .ph-char-card {
   position: relative; border-radius: var(--ph-radius); padding: 32px 12px 20px;
   display: flex; flex-direction: column; align-items: center;
-  transition: all .2s; overflow: hidden; border: 1px solid rgba(255,255,255,.15);
+  transition: all .25s; overflow: hidden; border: 1px solid rgba(255,255,255,.15);
   box-shadow: 0 8px 22px rgba(0,0,0,.4);
+  animation: ph-card-in .4s ease both;
 }
+@keyframes ph-card-in { from { opacity: 0; transform: translateY(16px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .ph-char-card:active { transform: scale(0.95); }
 .ph-char-card .inner-frame { position: absolute; inset: 7px; border-radius: 12px; border: 1px solid rgba(255,255,255,.1); pointer-events: none; }
 .ph-char-card .gem { position: absolute; width: 6px; height: 6px; transform: rotate(45deg); background: rgba(255,255,255,.6); }
@@ -185,7 +261,9 @@
   background: repeating-conic-gradient(from 0deg, rgba(255,255,255,.14) 0deg 2.4deg, transparent 2.4deg 9deg);
   -webkit-mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
   mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
+  animation: ph-spin 20s linear infinite;
 }
+@keyframes ph-spin { to { transform: rotate(360deg); } }
 .ph-avatar-halo { position: absolute; width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.12), transparent 62%); }
 .ph-avatar-ring1 { position: absolute; inset: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); }
 .ph-avatar-ring2 { position: absolute; inset: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); }
@@ -201,18 +279,60 @@
 .ph-empty { text-align: center; font-size: 12px; color: rgba(255,255,255,.35); padding: 64px 0; grid-column: 1 / -1; }
 
 /* ===== 房间页 ===== */
-.ph-room-page { height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; background: var(--ph-bg); }
+.ph-room-page { height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; background: var(--ph-bg); animation: ph-fade-in .3s ease; }
 
-/* 房间舞台 */
-.ph-stage { flex: 1; position: relative; overflow: hidden; touch-action: none; transition: all .5s; }
+/* 房间舞台（视口） */
+.ph-stage { flex: 1; position: relative; overflow: hidden; touch-action: none; }
+
+/* 房间世界（比视口更宽，可滑动） */
+.ph-room-world {
+  position: absolute; top: 0; left: 0;
+  width: 240%; height: 100%;
+  will-change: transform;
+}
 .ph-wall { position: absolute; top: 0; left: 0; width: 100%; height: 65%; transition: background .5s; z-index: 0; }
 .ph-floor { position: absolute; bottom: 0; left: 0; width: 100%; height: 35%; transition: background .5s; z-index: 0; }
 .ph-horizon-shadow { position: absolute; top: 65%; width: 100%; height: 32px; background: linear-gradient(to bottom, rgba(0,0,0,0.1), transparent); pointer-events: none; z-index: 0; }
 
+/* 踢脚线 */
+.ph-baseboard {
+  position: absolute; top: calc(65% - 6px); left: 0; width: 100%; height: 6px;
+  background: rgba(0,0,0,0.08); z-index: 1; pointer-events: none;
+}
+
+/* 窗户装饰 */
+.ph-window {
+  position: absolute; top: 8%; width: 130px; height: 160px;
+  border-radius: 6px 6px 3px 3px;
+  background: linear-gradient(to bottom, #a8d8ea 0%, #c5e4f5 40%, #e8f4fc 100%);
+  border: 5px solid rgba(255,255,255,0.7);
+  box-shadow: inset 0 0 30px rgba(255,255,255,0.4), 0 6px 20px rgba(0,0,0,0.12);
+  overflow: hidden; z-index: 1; pointer-events: none;
+}
+.ph-window::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 4px; background: rgba(255,255,255,0.7); transform: translateY(-50%); }
+.ph-window::after { content: ''; position: absolute; left: 50%; top: 0; width: 4px; height: 100%; background: rgba(255,255,255,0.7); transform: translateX(-50%); }
+.ph-window .cloud { position: absolute; width: 40px; height: 16px; background: rgba(255,255,255,0.6); border-radius: 20px; animation: ph-cloud-drift 15s linear infinite; }
+@keyframes ph-cloud-drift { from { left: -50px; } to { left: 150px; } }
+
+/* 窗户光束 */
+.ph-light-beam {
+  position: absolute; top: 8%; width: 180px; height: 55%;
+  background: linear-gradient(160deg, rgba(255,250,230,0.12) 0%, transparent 70%);
+  transform: skewX(-12deg); pointer-events: none; z-index: 1;
+}
+
+/* 浮尘粒子 */
+.ph-dust { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+.ph-dust span {
+  position: absolute; width: 3px; height: 3px; border-radius: 50%;
+  background: rgba(255,255,255,0.4); animation: ph-dust-float 8s ease-in-out infinite;
+}
+@keyframes ph-dust-float { 0%,100% { transform: translateY(0) translateX(0); opacity: 0.2; } 50% { transform: translateY(-30px) translateX(15px); opacity: 0.6; } }
+
 /* 家具 */
 .ph-item {
   position: absolute; transform-origin: bottom center; touch-action: none;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); transition: transform .2s ease-out;
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,0.18)); transition: transform .2s ease-out;
 }
 .ph-item.dragging { transition: none; z-index: 100 !important; will-change: left, top; }
 .ph-item.selected { outline: 2px solid var(--ph-primary); outline-offset: 4px; border-radius: 8px; }
@@ -229,23 +349,48 @@
 
 /* 角色 */
 .ph-actor {
-  position: absolute; transform-origin: bottom center; transition: left 1s ease-in-out, top 1s ease-in-out;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); cursor: pointer;
+  position: absolute; transform-origin: bottom center; transition: left 1s cubic-bezier(0.4,0,0.2,1), top 1s cubic-bezier(0.4,0,0.2,1);
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,0.2)); cursor: pointer; z-index: 98;
+  animation: ph-idle-breath 3s ease-in-out infinite;
 }
+@keyframes ph-idle-breath { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.01); } }
 .ph-actor img { width: 100%; height: 100%; object-fit: contain; }
-.ph-actor.walking img { animation: ph-bounce 0.5s ease-in-out; }
+.ph-actor.walking { animation: ph-walk-bounce 0.4s ease-in-out infinite; }
+@keyframes ph-walk-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 .ph-actor .bubble {
   position: absolute; bottom: 105%; left: 50%; transform: translateX(-50%);
   background: #fff; padding: 12px 16px; border-radius: 20px; border-bottom-left-radius: 4px;
   box-shadow: var(--ph-shadow); border: 2px solid rgba(0,0,0,0.05);
-  min-width: 120px; max-width: 280px; z-index: 50; animation: ph-pop-in .2s ease-out;
+  min-width: 120px; max-width: 260px; z-index: 50; animation: ph-pop-in .25s cubic-bezier(0.34,1.56,0.64,1);
 }
-.ph-actor .bubble p { font-size: 12px; font-weight: 700; color: var(--ph-text); text-align: center; word-break: break-word; line-height: 1.4; }
+.ph-actor .bubble::after {
+  content: ''; position: absolute; bottom: -8px; left: 20px;
+  width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent;
+  border-top: 8px solid #fff;
+}
+.ph-actor .bubble p { font-size: 13px; font-weight: 600; color: var(--ph-text); text-align: center; word-break: break-word; line-height: 1.5; }
 .ph-actor .bubble .close-btn {
   position: absolute; top: -8px; right: -8px; background: #e2e8f0; color: #64748b;
-  border-radius: 50%; width: 16px; height: 16px; display: flex; align-items: center;
-  justify-content: center; font-size: 8px;
+  border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center;
+  justify-content: center; font-size: 10px; font-weight: 700;
 }
+
+/* 滑动指示器 */
+.ph-pan-indicator {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  width: 100px; height: 3px; background: rgba(0,0,0,0.1); border-radius: 2px;
+  z-index: 20; overflow: hidden; pointer-events: none;
+}
+.ph-pan-indicator .fill {
+  position: absolute; top: 0; height: 100%; background: rgba(99,102,241,0.5); border-radius: 2px;
+  transition: left .1s ease, width .1s ease;
+}
+.ph-pan-hint {
+  position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
+  font-size: 9px; color: rgba(0,0,0,0.25); z-index: 20; pointer-events: none;
+  letter-spacing: 1px; animation: ph-hint-pulse 2s ease-in-out infinite;
+}
+@keyframes ph-hint-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
 
 /* 顶部工具栏 */
 .ph-top-bar {
@@ -253,6 +398,12 @@
   display: flex; justify-content: space-between; z-index: 30; pointer-events: none;
 }
 .ph-top-bar > * { pointer-events: auto; }
+.ph-char-label {
+  background: rgba(255,255,255,0.9); padding: 6px 14px; border-radius: 20px;
+  box-shadow: var(--ph-shadow); font-size: 13px; font-weight: 700; color: var(--ph-text);
+  display: flex; align-items: center; gap: 6px;
+}
+.ph-char-label .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
 .ph-icon-btn {
   background: rgba(255,255,255,0.9); padding: 8px; border-radius: 50%; box-shadow: var(--ph-shadow);
   display: flex; align-items: center; justify-content: center; transition: all .2s; color: var(--ph-text);
@@ -424,7 +575,7 @@
     sparkle: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
     camera: 'M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.174-1.26.21-2.152 1.35-2.152 2.625v7.596c0 1.397 1.17 2.476 2.564 2.362a47.24 47.24 0 0 0 13.872 0c1.394.114 2.564-.965 2.564-2.362V9.854c0-1.275-.892-2.415-2.152-2.625a37.5 37.5 0 0 0-1.134-.174 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.822 1.316ZM16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z',
     image: 'm2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z',
-    settings: 'M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28ZM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+    settings: 'M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.281ZM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
     trash: 'm14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0',
     copy: 'M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75',
     eye: 'M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
@@ -500,7 +651,6 @@
 
   function getActorImage() {
     if (!state.activeCharId) return ''
-    // 优先用自定义上传的立绘，否则用角色头像
     if (state.customSprites[state.activeCharId]) {
       return state.customSprites[state.activeCharId]
     }
@@ -512,17 +662,14 @@
     root.innerHTML = ''
     var page = el('div', 'ph-select-page')
 
-    // 星点
     page.appendChild(el('div', 'ph-stars'))
 
-    // 顶部
     var header = el('div', 'ph-select-header')
     var backBtn = el('button', 'ph-back-btn', { html: svgIcon(ICONS.back, 24) })
     backBtn.onclick = function () { if (rocheApi) rocheApi.ui.closeApp() }
     header.appendChild(backBtn)
 
-    var title = el('h1', 'ph-select-title', { text: '拜访谁的房间？' })
-    header.appendChild(title)
+    header.appendChild(el('h1', 'ph-select-title', { text: '拜访谁的房间？' }))
 
     var subtitle = el('div', 'ph-select-subtitle')
     subtitle.appendChild(el('span', 'line'))
@@ -531,10 +678,8 @@
     header.appendChild(subtitle)
     page.appendChild(header)
 
-    var desc = el('p', 'ph-select-desc', { text: '走进谁的房间，看看 ta 此刻在做什么、翻翻屋里的小物件。' })
-    page.appendChild(desc)
+    page.appendChild(el('p', 'ph-select-desc', { text: '走进谁的房间，看看 ta 此刻在做什么、翻翻屋里的小物件。' }))
 
-    // 角色网格
     var grid = el('div', 'ph-char-grid')
     var tints = [
       'linear-gradient(180deg,rgba(40,40,40,.9),rgba(20,20,20,.85))',
@@ -551,6 +696,7 @@
       state.characters.forEach(function (c, i) {
         var card = el('button', 'ph-char-card')
         card.style.background = tints[i % tints.length]
+        card.style.animationDelay = (i * 0.06) + 's'
 
         card.appendChild(el('div', 'inner-frame'))
         card.appendChild(el('span', 'gem tl'))
@@ -598,8 +744,16 @@
     state.mode = 'view'
     state.selectedItemId = null
     state.isToolbarCollapsed = false
+    state.panX = 0
+    state.pokeCount = 0
+    state.dialogueHistory = []
     await loadRoomData()
     renderRoomPage()
+    // 进入房间后显示问候对话
+    setTimeout(function () {
+      var greeting = pickDialogue('greeting')
+      showBubble(greeting)
+    }, 800)
   }
 
   // ========== 渲染：房间页 ==========
@@ -608,40 +762,97 @@
 
     var page = el('div', 'ph-room-page')
 
-    // 舞台
+    // 舞台（视口）
     var stage = el('div', 'ph-stage')
     stage.id = 'ph-stage'
+
+    // 房间世界（比视口宽，可滑动）
+    var world = el('div', 'ph-room-world')
+    world.id = 'ph-room-world'
 
     // 墙
     var wall = el('div', 'ph-wall')
     wall.id = 'ph-wall'
     wall.style.background = state.wallImage || WALLPAPER_PRESETS[0].value
-    stage.appendChild(wall)
+    world.appendChild(wall)
+
+    // 窗户装饰（两扇窗）
+    var win1 = el('div', 'ph-window')
+    win1.style.left = '6%'
+    var cloud1 = el('div', 'cloud')
+    cloud1.style.top = '25%'
+    win1.appendChild(cloud1)
+    world.appendChild(win1)
+
+    var win2 = el('div', 'ph-window')
+    win2.style.left = '62%'
+    var cloud2 = el('div', 'cloud')
+    cloud2.style.top = '40%'
+    cloud2.style.animationDelay = '5s'
+    win2.appendChild(cloud2)
+    world.appendChild(win2)
+
+    // 窗户光束
+    var beam1 = el('div', 'ph-light-beam')
+    beam1.style.left = '6%'
+    world.appendChild(beam1)
+
+    var beam2 = el('div', 'ph-light-beam')
+    beam2.style.left = '62%'
+    world.appendChild(beam2)
 
     // 地板
     var floor = el('div', 'ph-floor')
     floor.id = 'ph-floor'
     floor.style.background = state.floorImage || FLOOR_PRESETS[0].value
-    stage.appendChild(floor)
+    world.appendChild(floor)
 
-    // 地平线阴影
-    stage.appendChild(el('div', 'ph-horizon-shadow'))
+    // 地平线阴影 + 踢脚线
+    world.appendChild(el('div', 'ph-horizon-shadow'))
+    world.appendChild(el('div', 'ph-baseboard'))
+
+    // 浮尘粒子
+    var dust = el('div', 'ph-dust')
+    for (var d = 0; d < 6; d++) {
+      var particle = el('span')
+      particle.style.left = (Math.random() * 100) + '%'
+      particle.style.top = (20 + Math.random() * 50) + '%'
+      particle.style.animationDelay = (Math.random() * 8) + 's'
+      particle.style.animationDuration = (6 + Math.random() * 4) + 's'
+      dust.appendChild(particle)
+    }
+    world.appendChild(dust)
 
     // 家具
     state.items.forEach(function (item) {
-      stage.appendChild(createItemElement(item))
+      world.appendChild(createItemElement(item))
     })
 
     // 角色
     var actor = createActorElement()
-    if (actor) stage.appendChild(actor)
+    if (actor) world.appendChild(actor)
 
-    // 舞台点击
+    stage.appendChild(world)
+
+    // 滑动指示器
+    var indicator = el('div', 'ph-pan-indicator')
+    indicator.id = 'ph-pan-indicator'
+    var fill = el('div', 'fill')
+    fill.id = 'ph-pan-fill'
+    indicator.appendChild(fill)
+    stage.appendChild(indicator)
+
+    var hint = el('div', 'ph-pan-hint', { text: '◀ 左右滑动房间 ▶' })
+    hint.id = 'ph-pan-hint'
+    stage.appendChild(hint)
+
+    // 舞台点击（背景区域）
     stage.addEventListener('click', function (e) {
-      if (e.target === stage || e.target === wall || e.target === floor || e.target.classList.contains('ph-horizon-shadow')) {
+      if (e.target === stage || e.target === wall || e.target === floor || e.target === world || e.target.classList.contains('ph-horizon-shadow') || e.target.classList.contains('ph-baseboard')) {
         if (state.mode === 'edit') {
           state.selectedItemId = null
           renderEditToolbar()
+          refreshItemSelection()
         }
       }
     })
@@ -660,9 +871,17 @@
     }
     topBar.appendChild(backBtn)
 
+    // 角色名称标签
+    if (state.activeCharacter) {
+      var charName = state.activeCharacter.handle || state.activeCharacter.name || ''
+      var label = el('div', 'ph-char-label')
+      label.appendChild(el('span', 'dot'))
+      label.appendChild(el('span', '', { text: charName + ' 的房间' }))
+      topBar.appendChild(label)
+    }
+
     var topRight = el('div', 'ph-top-right')
 
-    // 编辑模式：撤销/重做（简化版）
     if (state.mode === 'edit') {
       var hideActorBtn = el('button', 'ph-icon-btn', { html: svgIcon(ICONS.eye, 22) })
       hideActorBtn.id = 'ph-hide-actor'
@@ -690,12 +909,15 @@
     topBar.appendChild(topRight)
     page.appendChild(topBar)
 
-    // 编辑模式工具栏
     if (state.mode === 'edit') {
       page.appendChild(createEditToolbar())
     }
 
     root.appendChild(page)
+
+    // 初始化滑动
+    initPanning()
+    updatePanIndicator()
   }
 
   // ========== 创建家具元素 ==========
@@ -707,14 +929,12 @@
     div.style.width = (80 * item.scale) + 'px'
     div.style.transform = 'translate(-50%, -100%) rotate(' + (item.rotation || 0) + 'deg)'
 
-    // z-index: 地毯在底层
     if (item.type === 'rug') {
       div.style.zIndex = String(1 + Math.floor(item.y / 10))
     } else {
       div.style.zIndex = String(Math.floor(item.y))
     }
 
-    // 内容
     if (item.image && (item.image.startsWith('http') || item.image.startsWith('data') || item.image.startsWith('blob'))) {
       var img = el('img', 'item-visual')
       img.src = item.image
@@ -726,14 +946,11 @@
       div.appendChild(emojiDiv)
     }
 
-    // 选中标记
     if (state.mode === 'edit' && state.selectedItemId === item.id) {
       div.classList.add('selected')
-      var label = el('div', 'selected-label', { text: '选中' })
-      div.appendChild(label)
+      div.appendChild(el('div', 'selected-label', { text: '选中' }))
     }
 
-    // 事件
     if (state.mode === 'edit') {
       div.style.cursor = 'grab'
       div.addEventListener('pointerdown', function (e) { handlePointerDown(e, item.id) })
@@ -761,10 +978,9 @@
     if (!state.activeCharacter) return null
     var actor = el('div', 'ph-actor')
     actor.id = 'ph-actor'
-    actor.style.left = '50%'
+    actor.style.left = '15%'
     actor.style.top = '78%'
     actor.style.width = '100px'
-    actor.style.zIndex = '98'
 
     var img = el('img')
     var avatarUrl = getActorImage()
@@ -794,18 +1010,58 @@
     return actor
   }
 
-  // ========== 角色互动 ==========
+  // ========== 对话系统 ==========
+  // 从指定类别中选取一条对话，避免连续重复
+  function pickDialogue(category) {
+    var pool = DIALOGUES[category] || DIALOGUES.tap
+    var available = []
+    for (var i = 0; i < pool.length; i++) {
+      if (state.dialogueHistory.indexOf(category + ':' + i) === -1) {
+        available.push(i)
+      }
+    }
+    // 如果全部用过了，清空历史重新开始
+    if (available.length === 0) {
+      state.dialogueHistory = state.dialogueHistory.filter(function (h) {
+        return h.indexOf(category + ':') !== 0
+      })
+      for (var j = 0; j < pool.length; j++) available.push(j)
+    }
+    var pick = available[Math.floor(Math.random() * available.length)]
+    state.dialogueHistory.push(category + ':' + pick)
+    // 只保留最近 8 条历史
+    if (state.dialogueHistory.length > 8) {
+      state.dialogueHistory = state.dialogueHistory.slice(-8)
+    }
+    return pool[pick]
+  }
+
+  // 点击角色互动
   function pokeActor() {
     var actor = document.getElementById('ph-actor')
     if (!actor) return
+
+    // 弹跳动画
     actor.style.animation = 'ph-bounce-actor 0.5s ease'
     setTimeout(function () { actor.style.animation = '' }, 500)
-    var thoughts = ['嗯？', '别闹...', '我在呢。', '盯着我看干嘛...', '(发呆)', '...嗯？', '怎么了？']
-    showBubble(thoughts[Math.floor(Math.random() * thoughts.length)])
+
+    // 检测是否是连续戳（2秒内）
+    var now = Date.now()
+    if (now - state.lastPokeTime < 2000) {
+      state.pokeCount++
+    } else {
+      state.pokeCount = 1
+    }
+    state.lastPokeTime = now
+
+    // 连续戳 3 次以上用 poke 对话，否则用 tap 对话
+    var category = state.pokeCount >= 3 ? 'poke' : 'tap'
+    var dialogue = pickDialogue(category)
+    showBubble(dialogue)
   }
 
+  // 观察家具
   function lookAtItem(item) {
-    // 角色走向物品
     var actor = document.getElementById('ph-actor')
     if (actor) {
       var targetY = Math.max(FLOOR_HORIZON, item.y + 5)
@@ -813,11 +1069,14 @@
       actor.style.top = targetY + '%'
       actor.classList.add('walking')
       setTimeout(function () { actor.classList.remove('walking') }, 600)
+
+      // 摄像机跟随角色
+      setTimeout(function () { ensureActorVisible(item.x) }, 100)
     }
     var desc = item.description || (item.name + '静静地摆放在那里。')
     showObservation(desc)
-    var reactions = ['(盯...)', '嗯，这个啊...', '...', '哼，没什么好看的。', '那个啊...']
-    showBubble(reactions[Math.floor(Math.random() * reactions.length)])
+    var reaction = pickDialogue('observe')
+    setTimeout(function () { showBubble(reaction) }, 700)
   }
 
   function showBubble(text) {
@@ -849,6 +1108,237 @@
     setTimeout(function () { if (card.parentNode) card.remove() }, 8000)
   }
 
+  // ========== 房间滑动系统 ==========
+  function initPanning() {
+    var stage = document.getElementById('ph-stage')
+    var world = document.getElementById('ph-room-world')
+    if (!stage || !world) return
+
+    function calcMinPan() {
+      state.minPanX = stage.offsetWidth - world.offsetWidth
+      if (state.minPanX > 0) state.minPanX = 0
+    }
+    calcMinPan()
+
+    // 防止重复绑定
+    stage._panBound = true
+    stage.addEventListener('pointerdown', onPanStart)
+  }
+
+  function onPanStart(e) {
+    var stage = document.getElementById('ph-stage')
+    if (!stage) return
+
+    var target = e.target
+    var isBackground = target === stage ||
+      target.classList.contains('ph-wall') ||
+      target.classList.contains('ph-floor') ||
+      target.classList.contains('ph-room-world') ||
+      target.classList.contains('ph-horizon-shadow') ||
+      target.classList.contains('ph-baseboard') ||
+      target.classList.contains('ph-dust') ||
+      target.classList.contains('ph-window') ||
+      target.classList.contains('ph-light-beam') ||
+      target.classList.contains('ph-pan-indicator') ||
+      target.classList.contains('ph-pan-hint')
+
+    if (!isBackground) return
+
+    // 停止惯性动画
+    if (state.panRAF) { cancelAnimationFrame(state.panRAF); state.panRAF = null }
+
+    state.isPanning = true
+    state.panPointer = {
+      startX: e.clientX,
+      startPanX: state.panX,
+      lastX: e.clientX,
+      lastTime: Date.now(),
+      velocity: 0,
+      moved: false,
+      pointerId: e.pointerId,
+    }
+
+    try { stage.setPointerCapture(e.pointerId) } catch (_) {}
+    stage.addEventListener('pointermove', onPanMove)
+    stage.addEventListener('pointerup', onPanEnd)
+    stage.addEventListener('pointercancel', onPanEnd)
+  }
+
+  function onPanMove(e) {
+    if (!state.isPanning || !state.panPointer) return
+    e.preventDefault()
+
+    var pp = state.panPointer
+    var delta = e.clientX - pp.startX
+    if (Math.abs(delta) > 5) pp.moved = true
+
+    var newX = pp.startPanX + delta
+    newX = clampPan(newX)
+
+    var now = Date.now()
+    var dt = now - pp.lastTime
+    if (dt > 0) {
+      pp.velocity = (e.clientX - pp.lastX) / dt
+    }
+    pp.lastX = e.clientX
+    pp.lastTime = now
+
+    setPanX(newX)
+  }
+
+  function onPanEnd(e) {
+    var stage = document.getElementById('ph-stage')
+    if (!stage) return
+
+    stage.removeEventListener('pointermove', onPanMove)
+    stage.removeEventListener('pointerup', onPanEnd)
+    stage.removeEventListener('pointercancel', onPanEnd)
+
+    var pp = state.panPointer
+    state.isPanning = false
+
+    if (!pp) return
+
+    // 如果几乎没移动，当作点击（编辑模式下取消选中）
+    if (!pp.moved) {
+      if (state.mode === 'edit' && state.selectedItemId) {
+        state.selectedItemId = null
+        renderEditToolbar()
+        refreshItemSelection()
+      }
+      state.panPointer = null
+      return
+    }
+
+    // 惯性滑动
+    var velocity = pp.velocity * 16
+    state.panPointer = null
+
+    if (Math.abs(velocity) > 0.5) {
+      animateMomentum(velocity)
+    } else {
+      snapToBounds()
+    }
+  }
+
+  function animateMomentum(velocity) {
+    var friction = 0.95
+    function step() {
+      velocity *= friction
+      var newX = state.panX + velocity
+      // 边界反弹
+      if (newX > 0) { newX = 0; velocity *= -0.3 }
+      if (newX < state.minPanX) { newX = state.minPanX; velocity *= -0.3 }
+      setPanX(newX)
+      if (Math.abs(velocity) > 0.3) {
+        state.panRAF = requestAnimationFrame(step)
+      } else {
+        state.panRAF = null
+        snapToBounds()
+      }
+    }
+    state.panRAF = requestAnimationFrame(step)
+  }
+
+  function snapToBounds() {
+    var target = state.panX
+    if (target > 0) target = 0
+    if (target < state.minPanX) target = state.minPanX
+    if (Math.abs(target - state.panX) < 1) return
+
+    var start = state.panX
+    var startTime = Date.now()
+    var duration = 300
+    function step() {
+      var t = Math.min(1, (Date.now() - startTime) / duration)
+      var ease = 1 - Math.pow(1 - t, 3)
+      setPanX(start + (target - start) * ease)
+      if (t < 1) {
+        state.panRAF = requestAnimationFrame(step)
+      } else {
+        state.panRAF = null
+      }
+    }
+    state.panRAF = requestAnimationFrame(step)
+  }
+
+  function clampPan(x) {
+    if (x > 0) return x * 0.3
+    if (x < state.minPanX) return state.minPanX + (x - state.minPanX) * 0.3
+    return x
+  }
+
+  function setPanX(x) {
+    state.panX = x
+    var world = document.getElementById('ph-room-world')
+    if (world) world.style.transform = 'translateX(' + x + 'px)'
+    updatePanIndicator()
+  }
+
+  function updatePanIndicator() {
+    var fill = document.getElementById('ph-pan-fill')
+    if (!fill) return
+    var world = document.getElementById('ph-room-world')
+    var stage = document.getElementById('ph-stage')
+    if (!world || !stage) return
+
+    var worldW = world.offsetWidth
+    var stageW = stage.offsetWidth
+    var visibleRatio = stageW / worldW
+    var progress = state.minPanX < 0 ? (-state.panX / state.minPanX) : 0
+
+    fill.style.width = (visibleRatio * 100) + '%'
+    fill.style.left = (progress * (100 - visibleRatio * 100)) + '%'
+
+    // 隐藏提示文字（滑动过后）
+    var hint = document.getElementById('ph-pan-hint')
+    if (hint && Math.abs(state.panX) > 20) {
+      hint.style.opacity = '0'
+      hint.style.transition = 'opacity .5s'
+    }
+  }
+
+  // 摄像机跟随：确保角色在可视区域内
+  function ensureActorVisible(actorLeftPercent) {
+    var stage = document.getElementById('ph-stage')
+    var world = document.getElementById('ph-room-world')
+    if (!stage || !world) return
+
+    var stageW = stage.offsetWidth
+    var worldW = world.offsetWidth
+    var actorScreenX = state.panX + (actorLeftPercent / 100) * worldW
+    var margin = 100
+
+    var targetPan = state.panX
+    if (actorScreenX < margin) {
+      targetPan = targetPan + (margin - actorScreenX)
+    } else if (actorScreenX > stageW - margin) {
+      targetPan = targetPan - (actorScreenX - (stageW - margin))
+    }
+
+    targetPan = Math.max(state.minPanX, Math.min(0, targetPan))
+    if (Math.abs(targetPan - state.panX) > 5) {
+      animatePanTo(targetPan, 800)
+    }
+  }
+
+  function animatePanTo(target, duration) {
+    if (state.panRAF) { cancelAnimationFrame(state.panRAF); state.panRAF = null }
+    var start = state.panX
+    var startTime = Date.now()
+    function step() {
+      var t = Math.min(1, (Date.now() - startTime) / duration)
+      var ease = 1 - Math.pow(1 - t, 3)
+      setPanX(start + (target - start) * ease)
+      if (t < 1) {
+        state.panRAF = requestAnimationFrame(step)
+      } else {
+        state.panRAF = null
+      }
+    }
+    state.panRAF = requestAnimationFrame(step)
+  }
+
   // ========== 角色立绘弹窗 ==========
   function showActorArtModal() {
     var overlay = el('div', 'ph-modal-overlay')
@@ -864,7 +1354,6 @@
     var body = el('div', 'ph-modal-body')
     var char = state.activeCharacter
 
-    // 立绘预览区
     var previewBox = el('div', '', {
       style: 'width:120px;height:120px;margin:0 auto 16px;border-radius:16px;overflow:hidden;background:#f1f5f9;display:flex;align-items:center;justify-content:center;border:2px dashed #cbd5e1;position:relative;'
     })
@@ -888,7 +1377,6 @@
     refreshPreview()
     body.appendChild(previewBox)
 
-    // 角色信息
     if (char) {
       var info = el('div', '', { style: 'text-align:center;margin-bottom:16px;' })
       info.appendChild(el('p', '', { text: char.name || '', style: 'font-size:15px;font-weight:700;color:#1e293b;' }))
@@ -896,21 +1384,17 @@
       body.appendChild(info)
     }
 
-    // 上传按钮区
     var uploadRow = el('div', '', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;' })
 
-    // 上传自定义图片
     var uploadBtn = el('button', '', {
       style: 'padding:14px;border-radius:14px;border:1px solid #e2e8f0;background:#f8fafc;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s;'
     })
     uploadBtn.innerHTML = svgIcon(ICONS.image, 26)
     uploadBtn.appendChild(el('span', '', { text: '上传立绘', style: 'font-size:12px;font-weight:700;color:#475569;' }))
     uploadBtn.appendChild(el('span', '', { text: '从设备选择图片', style: 'font-size:10px;color:#94a3b8;' }))
-    uploadBtn.onactive = function () { this.style.transform = 'scale(0.97)' }
     uploadBtn.onclick = function () { triggerSpriteUpload(refreshPreview) }
     uploadRow.appendChild(uploadBtn)
 
-    // 使用 URL 链接
     var urlBtn = el('button', '', {
       style: 'padding:14px;border-radius:14px;border:1px solid #e2e8f0;background:#f8fafc;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .15s;'
     })
@@ -922,7 +1406,6 @@
 
     body.appendChild(uploadRow)
 
-    // 重置按钮（如果有自定义立绘才显示）
     if (state.activeCharId && state.customSprites[state.activeCharId]) {
       var resetRow = el('div', '', { style: 'display:flex;gap:8px;' })
       var resetBtn = el('button', '', {
@@ -953,7 +1436,6 @@
     root.appendChild(overlay)
   }
 
-  // 触发立绘图片上传
   function triggerSpriteUpload(refreshPreview) {
     var input = el('input', '')
     input.type = 'file'
@@ -978,7 +1460,6 @@
     input.click()
   }
 
-  // URL 输入弹窗
   function showSpriteUrlInput(refreshPreview) {
     var urlOverlay = el('div', 'ph-modal-overlay')
     var urlModal = el('div', 'ph-modal')
@@ -1026,7 +1507,6 @@
     root.appendChild(urlOverlay)
   }
 
-  // 刷新房间里的角色立绘图
   function refreshActorImg() {
     var actor = document.getElementById('ph-actor')
     if (!actor) return
@@ -1057,7 +1537,7 @@
       startY: e.clientY,
       initialX: item.x,
       initialY: item.y,
-      width: rect.width,
+      width: rect.width * ROOM_WIDTH_RATIO,
       height: rect.height,
     }
 
@@ -1071,15 +1551,7 @@
 
     state.selectedItemId = id
     renderEditToolbar()
-    // 重新渲染选中状态
-    document.querySelectorAll('.ph-item').forEach(function (el) {
-      el.classList.remove('selected')
-      var label = el.querySelector('.selected-label')
-      if (label) label.remove()
-    })
-    elem.classList.add('selected')
-    var label = el('div', 'selected-label', { text: '选中' })
-    elem.appendChild(label)
+    refreshItemSelection()
 
     elem.addEventListener('pointermove', handlePointerMove)
     elem.addEventListener('pointerup', handlePointerUp)
@@ -1147,6 +1619,21 @@
     try { e.currentTarget.releasePointerCapture(e.pointerId) } catch (_) {}
   }
 
+  function refreshItemSelection() {
+    document.querySelectorAll('.ph-item').forEach(function (el) {
+      el.classList.remove('selected')
+      var label = el.querySelector('.selected-label')
+      if (label) label.remove()
+    })
+    if (state.selectedItemId) {
+      var sel = document.querySelector('.ph-item[data-id="' + state.selectedItemId + '"]')
+      if (sel) {
+        sel.classList.add('selected')
+        sel.appendChild(el('div', 'selected-label', { text: '选中' }))
+      }
+    }
+  }
+
   // ========== 编辑工具栏 ==========
   function createEditToolbar() {
     var toolbar = el('div', 'ph-edit-toolbar')
@@ -1177,7 +1664,6 @@
 
   function renderToolbarContent(content) {
     if (state.selectedItemId) {
-      // 选中物品编辑面板
       var sel = state.items.find(function (i) { return i.id === state.selectedItemId })
       if (sel) {
         content.appendChild(createItemEditor(sel))
@@ -1185,8 +1671,6 @@
       }
     }
 
-    // 默认：快捷操作 + 预设
-    // 快捷按钮行
     var actions = el('div', 'ph-quick-actions')
 
     var libBtn = createQuickBtn('#6366f1', '+', '家具库')
@@ -1211,7 +1695,6 @@
 
     content.appendChild(actions)
 
-    // 墙纸预设
     var wallRow = el('div', 'ph-preset-row')
     wallRow.appendChild(el('h4', '', { text: '墙面预设' }))
     var wallList = el('div', 'ph-preset-list')
@@ -1231,7 +1714,6 @@
     wallRow.appendChild(wallList)
     content.appendChild(wallRow)
 
-    // 地板预设
     var floorRow = el('div', 'ph-preset-row')
     floorRow.appendChild(el('h4', '', { text: '地板预设' }))
     var floorList = el('div', 'ph-preset-list')
@@ -1267,7 +1749,6 @@
   function createItemEditor(sel) {
     var editor = el('div', 'ph-item-editor')
 
-    // 头部
     var header = el('div', 'ph-editor-header')
     header.appendChild(el('span', 'title', { text: '调整 · ' + sel.name }))
     var actions = el('div', 'ph-editor-actions')
@@ -1280,11 +1761,9 @@
     header.appendChild(actions)
     editor.appendChild(header)
 
-    // 滑块 + 十字键
     var sliderGroup = el('div', 'ph-slider-group')
     var sliderCol = el('div', 'ph-slider-col')
 
-    // 缩放
     var scaleRow = el('div', 'ph-slider-row')
     scaleRow.appendChild(el('label', '', { html: '缩放 <span class="val">' + Math.round(sel.scale * 100) + '%</span>' }))
     var scaleInput = el('input', '')
@@ -1297,7 +1776,6 @@
     scaleRow.appendChild(scaleInput)
     sliderCol.appendChild(scaleRow)
 
-    // 旋转
     var rotRow = el('div', 'ph-slider-row')
     rotRow.appendChild(el('label', '', { html: '旋转 <span class="val">' + Math.round(sel.rotation || 0) + '°</span>' }))
     var rotInput = el('input', '')
@@ -1311,7 +1789,6 @@
     sliderCol.appendChild(rotRow)
     sliderGroup.appendChild(sliderCol)
 
-    // 十字键
     var numpad = el('div', 'ph-numpad')
     numpad.appendChild(el('span', 'spacer'))
     numpad.appendChild(makeNudgeBtn('↑', 0, -1))
@@ -1325,7 +1802,6 @@
     sliderGroup.appendChild(numpad)
     editor.appendChild(sliderGroup)
 
-    // 类型切换
     var isRug = sel.type === 'rug'
     var typeRow = el('div', '', { style: 'display:flex;align-items:center;justify-content:space-between;background:#f8fafc;border-radius:12px;padding:8px 12px;border:1px solid #f1f5f9;' })
     typeRow.appendChild(el('span', '', { text: '图层类型' + (isRug ? '：地毯（垫底）' : ''), style: 'font-size:10px;color:#94a3b8;' }))
@@ -1334,8 +1810,7 @@
     typeRow.appendChild(typeBtn)
     editor.appendChild(typeRow)
 
-    // 提示
-    editor.appendChild(el('p', '', { text: '小技巧：拖动移动位置，滚轮缩放，滑杆微调', style: 'font-size:9px;color:#cbd5e1;text-align:center;' }))
+    editor.appendChild(el('p', '', { text: '小技巧：拖动移动位置，滚轮缩放，滑杆微调，左右滑动查看宽景房间', style: 'font-size:9px;color:#cbd5e1;text-align:center;' }))
 
     return editor
   }
@@ -1364,7 +1839,6 @@
       return item
     })
     saveRoomData()
-    // 更新 DOM
     var elem = document.querySelector('.ph-item[data-id="' + state.selectedItemId + '"]')
     var sel = state.items.find(function (i) { return i.id === state.selectedItemId })
     if (elem && sel) {
@@ -1378,7 +1852,6 @@
         elem.style.zIndex = String(Math.floor(sel.y))
       }
     }
-    // 更新编辑面板
     renderEditToolbar()
   }
 
@@ -1420,7 +1893,6 @@
 
     var body = el('div', 'ph-modal-body')
 
-    // 合并预设 + 自定义
     var allCategories = {}
     for (var cat in FURNITURE_PRESETS) {
       allCategories[cat] = FURNITURE_PRESETS[cat]
@@ -1440,7 +1912,7 @@
       section.appendChild(h4)
 
       var grid = el('div', 'ph-library-grid')
-      assets.forEach(function (asset, i) {
+      assets.forEach(function (asset) {
         var item = el('button', 'ph-library-item')
         var box = el('div', 'icon-box')
         if (asset.image && (asset.image.startsWith('http') || asset.image.startsWith('data') || asset.image.startsWith('blob'))) {
@@ -1475,13 +1947,23 @@
   }
 
   function addItem(asset, category) {
+    // 在当前可视区域中心放置新家具
+    var stage = document.getElementById('ph-stage')
+    var world = document.getElementById('ph-room-world')
+    var centerX = 44
+    if (stage && world) {
+      var visibleStart = (-state.panX / world.offsetWidth) * 100
+      var visibleEnd = visibleStart + (stage.offsetWidth / world.offsetWidth) * 100
+      centerX = (visibleStart + visibleEnd) / 2
+    }
+
     var newItem = {
       id: 'item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       name: asset.name,
       type: category === 'rug' || asset.isRug ? 'rug' : (category === 'custom' ? (asset.itemType || 'furniture') : category),
       image: asset.image && (asset.image.startsWith('http') || asset.image.startsWith('data') || asset.image.startsWith('blob')) ? asset.image : '',
       emoji: asset.emoji || (asset.image && !asset.image.startsWith('http') ? asset.image : '📦'),
-      x: 44 + Math.random() * 12,
+      x: centerX + (Math.random() - 0.5) * 8,
       y: 46 + Math.random() * 12,
       scale: asset.defaultScale || 1.0,
       rotation: 0,
@@ -1519,10 +2001,7 @@
     var uploadBox = el('div', 'ph-upload-box')
     uploadBox.id = 'ph-upload-box'
     uploadBox.appendChild(el('span', 'placeholder', { text: '+ 上传' }))
-
-    // 点击上传框触发文件选择
     uploadBox.onclick = function () { triggerCustomItemUpload(uploadBox) }
-
     top.appendChild(uploadBox)
 
     var fields = el('div', 'ph-custom-fields')
@@ -1535,7 +2014,6 @@
     urlInput.value = state.customUrl
     urlInput.oninput = function () {
       state.customUrl = urlInput.value
-      // 输入 URL 时清除上传的图片预览
       if (urlInput.value.trim()) {
         state.customImageData = ''
         updateUploadPreview(uploadBox, urlInput.value)
@@ -1612,7 +2090,6 @@
     root.appendChild(overlay)
   }
 
-  // 触发自定义家具图片上传
   function triggerCustomItemUpload(uploadBox) {
     var input = el('input', '')
     input.type = 'file'
@@ -1625,11 +2102,9 @@
       reader.onload = function (ev) {
         var dataUrl = ev.target.result
         state.customImageData = dataUrl
-        state.customUrl = '' // 清除 URL，优先用上传的图
-        // 同步清空 URL 输入框
+        state.customUrl = ''
         var urlInput = document.querySelector('.ph-custom-fields input[type="text"][placeholder="https://..."]')
         if (urlInput) urlInput.value = ''
-        // 更新预览
         uploadBox.innerHTML = ''
         var img = el('img')
         img.src = dataUrl
@@ -1643,7 +2118,6 @@
 
   function updateUploadPreview(box, url) {
     box.innerHTML = ''
-    // 优先显示上传的图片
     if (state.customImageData) {
       var uploadImg = el('img')
       uploadImg.src = state.customImageData
@@ -1673,13 +2147,11 @@
       if (rocheApi) rocheApi.ui.toast('请填写物品名称')
       return
     }
-    // 上传图片、URL、Emoji 至少有一个
     if (!uploadImg && !url && !emoji) {
       if (rocheApi) rocheApi.ui.toast('请上传图片、填图片 URL 或 Emoji')
       return
     }
 
-    // 优先使用上传的图片
     var imageSrc = uploadImg || url || ''
 
     var asset = {
@@ -1692,10 +2164,7 @@
     }
     state.customAssets.push(asset)
     saveCustomAssets()
-
-    // 同时添加到房间
     addItem(asset, 'custom')
-
     overlay.remove()
     if (rocheApi) rocheApi.ui.toast('已添加：' + name)
   }
@@ -1744,12 +2213,11 @@
   window.RochePlugin = window.RochePlugin || {}
   window.RochePlugin.register = window.RochePlugin.register || function () {}
 
-  // 使用标准注册方式
   if (window.RochePlugin && window.RochePlugin.register) {
     window.RochePlugin.register({
       id: 'pixel-house',
       name: '像素小屋',
-      version: '3.1.0',
+      version: '4.0.0',
       apps: [
         {
           id: 'pixel-house-home',
@@ -1760,7 +2228,6 @@
             rocheApi = roche
             root = el('div', 'roche-plugin-pixel-house')
 
-            // 注入样式
             styleEl = el('style')
             styleEl.textContent = CSS
             document.head.appendChild(styleEl)
@@ -1768,15 +2235,14 @@
             container.innerHTML = ''
             container.appendChild(root)
 
-            // 加载角色和自定义素材
             await loadCharacters()
             await loadCustomAssets()
             await loadCustomSprites()
 
-            // 渲染选人页
             renderSelectPage()
           },
           async unmount(container, roche) {
+            if (state.panRAF) { cancelAnimationFrame(state.panRAF); state.panRAF = null }
             if (styleEl && styleEl.parentNode) {
               styleEl.parentNode.removeChild(styleEl)
               styleEl = null
