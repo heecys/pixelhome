@@ -1,6 +1,6 @@
 /**
- * 像素小屋 — Roche 插件 v4.0.0
- * 重构版：宽景房间滑动平移、丰富角色对话系统、精致 UI 与流畅交互
+ * 像素小屋 — Roche 插件 v4.1.0
+ * 重构版：宽景房间滑动平移、丰富角色对话系统、可拖动多样式窗户、精致 UI 与流畅交互
  * 功能：角色选择、房间装修、家具拖拽缩放旋转、墙纸地板切换、自定义素材上传、角色立绘更换
  */
 ;(function () {
@@ -72,6 +72,60 @@
     custom: '自定义',
   }
 
+  // 窗户样式预设
+  var WINDOW_PRESETS = [
+    {
+      name: '蓝天白云',
+      width: 180, height: 220,
+      bg: 'linear-gradient(to bottom, #a8d8ea 0%, #c5e4f5 40%, #e8f4fc 100%)',
+      frame: 'rgba(255,255,255,0.8)',
+      cross: true,
+      cloud: true,
+    },
+    {
+      name: '日落暖光',
+      width: 180, height: 220,
+      bg: 'linear-gradient(to bottom, #ffd89b 0%, #ff9a76 50%, #ff6b6b 100%)',
+      frame: 'rgba(120,80,40,0.7)',
+      cross: true,
+      cloud: false,
+    },
+    {
+      name: '星空夜窗',
+      width: 180, height: 220,
+      bg: 'linear-gradient(to bottom, #0f172a 0%, #1e3a5f 60%, #2d4a7c 100%)',
+      frame: 'rgba(200,200,220,0.5)',
+      cross: true,
+      cloud: false,
+      stars: true,
+    },
+    {
+      name: '青翠花园',
+      width: 180, height: 220,
+      bg: 'linear-gradient(to bottom, #86efac 0%, #4ade80 50%, #16a34a 100%)',
+      frame: 'rgba(255,255,255,0.75)',
+      cross: true,
+      cloud: false,
+    },
+    {
+      name: '圆拱窗',
+      width: 160, height: 240,
+      bg: 'linear-gradient(to bottom, #bae6fd 0%, #e0f2fe 60%, #f0f9ff 100%)',
+      frame: 'rgba(255,255,255,0.85)',
+      cross: false,
+      arch: true,
+      cloud: true,
+    },
+    {
+      name: '彩色花窗',
+      width: 170, height: 210,
+      bg: 'conic-gradient(from 45deg, #fbbf24, #f472b6, #818cf8, #34d399, #fbbf24)',
+      frame: 'rgba(255,255,255,0.6)',
+      cross: true,
+      cloud: false,
+    },
+  ]
+
   // ========== 对话系统 ==========
   var DIALOGUES = {
     // 点击角色时的日常闲聊（20条）
@@ -137,9 +191,11 @@
     activeCharacter: null,
     characters: [],
     items: [],
+    windows: [], // 窗户列表 { id, styleIdx, x, y }
     wallImage: '',
     floorImage: '',
     selectedItemId: null,
+    selectedWindowId: null,
     showLibrary: false,
     showCustomModal: false,
     customAssets: [],
@@ -151,6 +207,11 @@
     dragElement: null,
     pendingPos: null,
     rafId: null,
+    // 窗户拖拽
+    draggingWindowId: null,
+    winDragStart: null,
+    winDragElement: null,
+    winPendingPos: null,
     // custom modal
     customName: '',
     customEmoji: '',
@@ -241,39 +302,17 @@
 .ph-char-grid { position: relative; z-index: 2; flex: 1; overflow-y: auto; padding: 16px 20px 20px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; align-content: start; }
 .ph-char-grid::-webkit-scrollbar { display: none; }
 .ph-char-card {
-  position: relative; border-radius: var(--ph-radius); padding: 32px 12px 20px;
+  position: relative; border-radius: 14px; padding: 24px 12px 18px;
   display: flex; flex-direction: column; align-items: center;
-  transition: all .25s; overflow: hidden; border: 1px solid rgba(255,255,255,.15);
-  box-shadow: 0 8px 22px rgba(0,0,0,.4);
-  animation: ph-card-in .4s ease both;
+  transition: all .2s; overflow: hidden; border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  animation: ph-card-in .3s ease both;
 }
-@keyframes ph-card-in { from { opacity: 0; transform: translateY(16px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
-.ph-char-card:active { transform: scale(0.95); }
-.ph-char-card .inner-frame { position: absolute; inset: 7px; border-radius: 12px; border: 1px solid rgba(255,255,255,.1); pointer-events: none; }
-.ph-char-card .gem { position: absolute; width: 6px; height: 6px; transform: rotate(45deg); background: rgba(255,255,255,.6); }
-.ph-char-card .gem.tl { top: 10px; left: 10px; }
-.ph-char-card .gem.tr { top: 10px; right: 10px; }
-.ph-char-card .gem.bl { bottom: 10px; left: 10px; }
-.ph-char-card .gem.br { bottom: 10px; right: 10px; }
-.ph-avatar-wrap { position: relative; width: 92px; height: 92px; display: flex; align-items: center; justify-content: center; }
-.ph-avatar-compass {
-  position: absolute; width: 124px; height: 124px; border-radius: 50%;
-  background: repeating-conic-gradient(from 0deg, rgba(255,255,255,.14) 0deg 2.4deg, transparent 2.4deg 9deg);
-  -webkit-mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
-  mask-image: radial-gradient(circle, transparent 40%, #000 44%, #000 50%, transparent 55%);
-  animation: ph-spin 20s linear infinite;
-}
-@keyframes ph-spin { to { transform: rotate(360deg); } }
-.ph-avatar-halo { position: absolute; width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.12), transparent 62%); }
-.ph-avatar-ring1 { position: absolute; inset: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); }
-.ph-avatar-ring2 { position: absolute; inset: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); }
-.ph-avatar-img { width: 70px; height: 70px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 18px rgba(255,255,255,.2); position: relative; z-index: 1; }
+@keyframes ph-card-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.ph-char-card:active { transform: scale(0.96); }
+.ph-avatar-wrap { position: relative; width: 76px; height: 76px; display: flex; align-items: center; justify-content: center; }
+.ph-avatar-img { width: 68px; height: 68px; border-radius: 50%; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.3); border: 2px solid rgba(255,255,255,.15); position: relative; z-index: 1; }
 .ph-avatar-img img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(100%) contrast(1.1); }
-.ph-avatar-badge {
-  position: absolute; bottom: 0; right: 6px; width: 22px; height: 22px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.5);
-  display: flex; align-items: center; justify-content: center; font-size: 10px; z-index: 2;
-}
 .ph-char-name { margin-top: 12px; font-size: 14px; font-weight: 600; letter-spacing: 0.5px; color: #f0f0f0; font-family: 'Noto Serif SC', serif; }
 .ph-char-sub { margin-top: 2px; font-size: 10px; color: rgba(255,255,255,.4); }
 .ph-empty { text-align: center; font-size: 12px; color: rgba(255,255,255,.35); padding: 64px 0; grid-column: 1 / -1; }
@@ -302,17 +341,22 @@
 
 /* 窗户装饰 */
 .ph-window {
-  position: absolute; top: 8%; width: 130px; height: 160px;
-  border-radius: 6px 6px 3px 3px;
-  background: linear-gradient(to bottom, #a8d8ea 0%, #c5e4f5 40%, #e8f4fc 100%);
-  border: 5px solid rgba(255,255,255,0.7);
-  box-shadow: inset 0 0 30px rgba(255,255,255,0.4), 0 6px 20px rgba(0,0,0,0.12);
-  overflow: hidden; z-index: 1; pointer-events: none;
+  position: absolute; top: 6%;
+  border-radius: 8px 8px 4px 4px;
+  box-shadow: inset 0 0 30px rgba(255,255,255,0.3), 0 8px 24px rgba(0,0,0,0.15);
+  overflow: hidden; z-index: 1;
+  transition: left .2s ease-out, top .2s ease-out;
 }
-.ph-window::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 4px; background: rgba(255,255,255,0.7); transform: translateY(-50%); }
-.ph-window::after { content: ''; position: absolute; left: 50%; top: 0; width: 4px; height: 100%; background: rgba(255,255,255,0.7); transform: translateX(-50%); }
+.ph-window.editing { cursor: grab; border: 2px dashed rgba(99,102,241,0.6) !important; }
+.ph-window.editing:active { cursor: grabbing; }
+.ph-window.dragging { transition: none; z-index: 50; }
+.ph-window .win-cross-h { position: absolute; top: 50%; left: 0; width: 100%; height: 5px; background: var(--win-frame, rgba(255,255,255,0.7)); transform: translateY(-50%); pointer-events: none; }
+.ph-window .win-cross-v { position: absolute; left: 50%; top: 0; width: 5px; height: 100%; background: var(--win-frame, rgba(255,255,255,0.7)); transform: translateX(-50%); pointer-events: none; }
 .ph-window .cloud { position: absolute; width: 40px; height: 16px; background: rgba(255,255,255,0.6); border-radius: 20px; animation: ph-cloud-drift 15s linear infinite; }
-@keyframes ph-cloud-drift { from { left: -50px; } to { left: 150px; } }
+.ph-window .win-star { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,0.8); animation: ph-twinkle 2s ease-in-out infinite alternate; }
+.ph-window.arch { border-radius: 50% 50% 4px 4px / 25% 25% 4px 4px; }
+.ph-window.selected { outline: 2px solid var(--ph-primary); outline-offset: 4px; }
+@keyframes ph-cloud-drift { from { left: -50px; } to { left: 200px; } }
 
 /* 窗户光束 */
 .ph-light-beam {
@@ -595,13 +639,16 @@
       try {
         var parsed = typeof data === 'string' ? JSON.parse(data) : data
         state.items = parsed.items || []
+        state.windows = parsed.windows || []
         state.wallImage = parsed.wallImage || ''
         state.floorImage = parsed.floorImage || ''
       } catch (e) {
         state.items = []
+        state.windows = []
       }
     } else {
       state.items = []
+      state.windows = []
     }
   }
 
@@ -609,6 +656,7 @@
     if (!rocheApi) return
     var data = {
       items: state.items,
+      windows: state.windows,
       wallImage: state.wallImage,
       floorImage: state.floorImage,
     }
@@ -670,45 +718,21 @@
     header.appendChild(backBtn)
 
     header.appendChild(el('h1', 'ph-select-title', { text: '拜访谁的房间？' }))
-
-    var subtitle = el('div', 'ph-select-subtitle')
-    subtitle.appendChild(el('span', 'line'))
-    subtitle.appendChild(el('span', 'text', { text: '✦ VISIT ROOM ✦' }))
-    subtitle.appendChild(el('span', 'line r'))
-    header.appendChild(subtitle)
     page.appendChild(header)
 
-    page.appendChild(el('p', 'ph-select-desc', { text: '走进谁的房间，看看 ta 此刻在做什么、翻翻屋里的小物件。' }))
+    page.appendChild(el('p', 'ph-select-desc', { text: '选择角色，走进 ta 的房间' }))
 
     var grid = el('div', 'ph-char-grid')
-    var tints = [
-      'linear-gradient(180deg,rgba(40,40,40,.9),rgba(20,20,20,.85))',
-      'linear-gradient(180deg,rgba(50,50,50,.88),rgba(25,25,25,.85))',
-      'linear-gradient(180deg,rgba(35,35,35,.9),rgba(18,18,18,.85))',
-      'linear-gradient(180deg,rgba(45,45,45,.88),rgba(22,22,22,.85))',
-      'linear-gradient(180deg,rgba(38,38,38,.9),rgba(20,20,20,.85))',
-      'linear-gradient(180deg,rgba(42,42,42,.88),rgba(24,24,24,.85))',
-    ]
 
     if (!state.characters || state.characters.length === 0) {
       grid.appendChild(el('div', 'ph-empty', { text: '还没有角色，先去创建一个吧。' }))
     } else {
       state.characters.forEach(function (c, i) {
         var card = el('button', 'ph-char-card')
-        card.style.background = tints[i % tints.length]
-        card.style.animationDelay = (i * 0.06) + 's'
-
-        card.appendChild(el('div', 'inner-frame'))
-        card.appendChild(el('span', 'gem tl'))
-        card.appendChild(el('span', 'gem tr'))
-        card.appendChild(el('span', 'gem bl'))
-        card.appendChild(el('span', 'gem br'))
+        card.style.background = 'linear-gradient(180deg,rgba(35,35,35,.9),rgba(18,18,18,.85))'
+        card.style.animationDelay = (i * 0.04) + 's'
 
         var avatarWrap = el('div', 'ph-avatar-wrap')
-        avatarWrap.appendChild(el('div', 'ph-avatar-compass'))
-        avatarWrap.appendChild(el('div', 'ph-avatar-halo'))
-        avatarWrap.appendChild(el('div', 'ph-avatar-ring1'))
-        avatarWrap.appendChild(el('div', 'ph-avatar-ring2'))
         var avatarImg = el('div', 'ph-avatar-img')
         var img = el('img')
         img.src = c.avatar || ''
@@ -716,11 +740,6 @@
         img.onerror = function () { this.style.display = 'none' }
         avatarImg.appendChild(img)
         avatarWrap.appendChild(avatarImg)
-
-        var badge = el('div', 'ph-avatar-badge')
-        badge.innerHTML = svgIcon('M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75', 14)
-        badge.style.color = '#333'
-        avatarWrap.appendChild(badge)
         card.appendChild(avatarWrap)
 
         var name = c.handle || c.name || '未知角色'
@@ -743,6 +762,7 @@
     state.view = 'room'
     state.mode = 'view'
     state.selectedItemId = null
+    state.selectedWindowId = null
     state.isToolbarCollapsed = false
     state.panX = 0
     state.pokeCount = 0
@@ -776,30 +796,22 @@
     wall.style.background = state.wallImage || WALLPAPER_PRESETS[0].value
     world.appendChild(wall)
 
-    // 窗户装饰（两扇窗）
-    var win1 = el('div', 'ph-window')
-    win1.style.left = '6%'
-    var cloud1 = el('div', 'cloud')
-    cloud1.style.top = '25%'
-    win1.appendChild(cloud1)
-    world.appendChild(win1)
-
-    var win2 = el('div', 'ph-window')
-    win2.style.left = '62%'
-    var cloud2 = el('div', 'cloud')
-    cloud2.style.top = '40%'
-    cloud2.style.animationDelay = '5s'
-    win2.appendChild(cloud2)
-    world.appendChild(win2)
-
-    // 窗户光束
-    var beam1 = el('div', 'ph-light-beam')
-    beam1.style.left = '6%'
-    world.appendChild(beam1)
-
-    var beam2 = el('div', 'ph-light-beam')
-    beam2.style.left = '62%'
-    world.appendChild(beam2)
+    // 窗户（从 state 动态渲染，首次进入给默认两扇窗）
+    if (!state.windows || state.windows.length === 0) {
+      state.windows = [
+        { id: 'win-' + Date.now() + '-1', styleIdx: 0, x: 6, y: 6 },
+        { id: 'win-' + Date.now() + '-2', styleIdx: 0, x: 62, y: 6 },
+      ]
+      saveRoomData()
+    }
+    state.windows.forEach(function (win) {
+      var winEl = createWindowElement(win)
+      if (winEl) world.appendChild(winEl)
+      // 窗户光束
+      var beam = el('div', 'ph-light-beam')
+      beam.style.left = win.x + '%'
+      world.appendChild(beam)
+    })
 
     // 地板
     var floor = el('div', 'ph-floor')
@@ -851,8 +863,10 @@
       if (e.target === stage || e.target === wall || e.target === floor || e.target === world || e.target.classList.contains('ph-horizon-shadow') || e.target.classList.contains('ph-baseboard')) {
         if (state.mode === 'edit') {
           state.selectedItemId = null
+          state.selectedWindowId = null
           renderEditToolbar()
           refreshItemSelection()
+          refreshWindowSelection()
         }
       }
     })
@@ -903,6 +917,7 @@
     modeBtn.onclick = function () {
       state.mode = state.mode === 'view' ? 'edit' : 'view'
       state.selectedItemId = null
+      state.selectedWindowId = null
       renderRoomPage()
     }
     topRight.appendChild(modeBtn)
@@ -971,6 +986,165 @@
     }
 
     return div
+  }
+
+  // ========== 创建窗户元素 ==========
+  function createWindowElement(win) {
+    var preset = WINDOW_PRESETS[win.styleIdx] || WINDOW_PRESETS[0]
+    var div = el('div', 'ph-window')
+    div.dataset.winId = win.id
+    div.style.left = win.x + '%'
+    div.style.top = (win.y || 6) + '%'
+    div.style.width = preset.width + 'px'
+    div.style.height = preset.height + 'px'
+    div.style.background = preset.bg
+    div.style.border = '5px solid ' + preset.frame
+    div.style.setProperty('--win-frame', preset.frame)
+
+    if (preset.arch) div.classList.add('arch')
+
+    // 十字窗框
+    if (preset.cross) {
+      div.appendChild(el('div', 'win-cross-h'))
+      div.appendChild(el('div', 'win-cross-v'))
+    }
+
+    // 云朵
+    if (preset.cloud) {
+      var cloud = el('div', 'cloud')
+      cloud.style.top = (20 + Math.random() * 30) + '%'
+      cloud.style.animationDelay = (Math.random() * 5) + 's'
+      div.appendChild(cloud)
+    }
+
+    // 星星（星空窗）
+    if (preset.stars) {
+      for (var s = 0; s < 6; s++) {
+        var star = el('div', 'win-star')
+        star.style.left = (10 + Math.random() * 80) + '%'
+        star.style.top = (10 + Math.random() * 70) + '%'
+        star.style.animationDelay = (Math.random() * 2) + 's'
+        div.appendChild(star)
+      }
+    }
+
+    // 编辑模式：可拖动 + 选中
+    if (state.mode === 'edit') {
+      div.classList.add('editing')
+      if (state.selectedWindowId === win.id) {
+        div.classList.add('selected')
+      }
+      div.addEventListener('pointerdown', function (e) { handleWindowPointerDown(e, win.id) })
+    } else {
+      // 浏览模式：点击窗户时角色有反应
+      div.style.pointerEvents = 'none'
+    }
+
+    return div
+  }
+
+  // ========== 窗户拖拽 ==========
+  function handleWindowPointerDown(e, id) {
+    if (state.mode !== 'edit') return
+    e.preventDefault()
+    e.stopPropagation()
+
+    var win = state.windows.find(function (w) { return w.id === id })
+    if (!win) return
+
+    var stage = document.getElementById('ph-stage')
+    if (!stage) return
+    var rect = stage.getBoundingClientRect()
+
+    state.draggingWindowId = id
+    state.winDragStart = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initialX: win.x,
+      initialY: win.y,
+      width: rect.width * ROOM_WIDTH_RATIO,
+      height: rect.height,
+    }
+
+    var elem = e.currentTarget
+    state.winDragElement = elem
+    elem.setPointerCapture(e.pointerId)
+    elem.classList.add('dragging')
+
+    state.selectedWindowId = id
+    state.selectedItemId = null
+    refreshItemSelection()
+    refreshWindowSelection()
+    renderEditToolbar()
+
+    elem.addEventListener('pointermove', handleWindowPointerMove)
+    elem.addEventListener('pointerup', handleWindowPointerUp)
+    elem.addEventListener('pointercancel', handleWindowPointerUp)
+  }
+
+  function handleWindowPointerMove(e) {
+    if (!state.draggingWindowId || !state.winDragStart) return
+    e.preventDefault()
+
+    var ds = state.winDragStart
+    var deltaX = e.clientX - ds.startX
+    var deltaY = e.clientY - ds.startY
+
+    var nextX = Math.max(0, Math.min(95, ds.initialX + (deltaX / ds.width) * 100))
+    var nextY = Math.max(0, Math.min(55, ds.initialY + (deltaY / ds.height) * 100))
+
+    state.winPendingPos = { x: nextX, y: nextY }
+
+    if (state.winDragElement && !state.rafId) {
+      state.rafId = requestAnimationFrame(function () {
+        if (state.winDragElement && state.winPendingPos) {
+          state.winDragElement.style.left = state.winPendingPos.x + '%'
+          state.winDragElement.style.top = state.winPendingPos.y + '%'
+        }
+        state.rafId = null
+      })
+    }
+  }
+
+  function handleWindowPointerUp(e) {
+    if (!state.draggingWindowId) return
+
+    if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null }
+
+    if (state.winDragElement) {
+      state.winDragElement.classList.remove('dragging')
+      state.winDragElement.removeEventListener('pointermove', handleWindowPointerMove)
+      state.winDragElement.removeEventListener('pointerup', handleWindowPointerUp)
+      state.winDragElement.removeEventListener('pointercancel', handleWindowPointerUp)
+    }
+
+    if (state.winPendingPos) {
+      var dragId = state.draggingWindowId
+      state.windows = state.windows.map(function (w) {
+        if (w.id === dragId) {
+          return Object.assign({}, w, { x: state.winPendingPos.x, y: state.winPendingPos.y })
+        }
+        return w
+      })
+      saveRoomData()
+    }
+
+    state.draggingWindowId = null
+    state.winDragStart = null
+    state.winDragElement = null
+    state.winPendingPos = null
+
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch (_) {}
+  }
+
+  function refreshWindowSelection() {
+    document.querySelectorAll('.ph-window').forEach(function (el) {
+      el.classList.remove('selected')
+    })
+    if (state.selectedWindowId) {
+      var sel = document.querySelector('.ph-window[data-win-id="' + state.selectedWindowId + '"]')
+      if (sel) sel.classList.add('selected')
+    }
   }
 
   // ========== 创建角色元素 ==========
@@ -1201,10 +1375,12 @@
 
     // 如果几乎没移动，当作点击（编辑模式下取消选中）
     if (!pp.moved) {
-      if (state.mode === 'edit' && state.selectedItemId) {
+      if (state.mode === 'edit' && (state.selectedItemId || state.selectedWindowId)) {
         state.selectedItemId = null
+        state.selectedWindowId = null
         renderEditToolbar()
         refreshItemSelection()
+        refreshWindowSelection()
       }
       state.panPointer = null
       return
@@ -1671,6 +1847,15 @@
       }
     }
 
+    // 选中窗户时的编辑面板
+    if (state.selectedWindowId) {
+      var selWin = state.windows.find(function (w) { return w.id === state.selectedWindowId })
+      if (selWin) {
+        content.appendChild(createWindowEditor(selWin))
+        return
+      }
+    }
+
     var actions = el('div', 'ph-quick-actions')
 
     var libBtn = createQuickBtn('#6366f1', '+', '家具库')
@@ -1680,6 +1865,10 @@
     var customBtn = createQuickBtn('#a855f7', svgIcon(ICONS.sparkle, 24), '自定义')
     customBtn.onclick = function () { showCustomModal() }
     actions.appendChild(customBtn)
+
+    var winBtn = createQuickBtn('#38bdf8', '🪟', '窗户')
+    winBtn.onclick = function () { addWindow() }
+    actions.appendChild(winBtn)
 
     var actorBtn = createQuickBtn('#ec4899', svgIcon(ICONS.camera, 24), '角色信息')
     actorBtn.onclick = function () { showActorArtModal() }
@@ -1694,6 +1883,37 @@
     actions.appendChild(floorBtn)
 
     content.appendChild(actions)
+
+    // 窗户样式预设
+    var winRow = el('div', 'ph-preset-row')
+    winRow.appendChild(el('h4', '', { text: '窗户样式（点选中的窗户换样式）' }))
+    var winList = el('div', 'ph-preset-list')
+    WINDOW_PRESETS.forEach(function (wp, idx) {
+      var swatch = el('button', 'ph-preset-swatch')
+      swatch.style.background = wp.bg
+      swatch.style.border = '3px solid ' + wp.frame
+      swatch.style.width = '48px'
+      swatch.style.height = '56px'
+      swatch.title = wp.name
+      swatch.onclick = function () {
+        if (state.selectedWindowId) {
+          // 给选中的窗户换样式
+          state.windows = state.windows.map(function (w) {
+            if (w.id === state.selectedWindowId) return Object.assign({}, w, { styleIdx: idx })
+            return w
+          })
+          saveRoomData()
+          renderRoomPage()
+          if (rocheApi) rocheApi.ui.toast('窗户样式：' + wp.name)
+        } else {
+          // 没选中窗户时，添加一扇新窗户
+          addWindowWithStyle(idx)
+        }
+      }
+      winList.appendChild(swatch)
+    })
+    winRow.appendChild(winList)
+    content.appendChild(winRow)
 
     var wallRow = el('div', 'ph-preset-row')
     wallRow.appendChild(el('h4', '', { text: '墙面预设' }))
@@ -1732,6 +1952,78 @@
     })
     floorRow.appendChild(floorList)
     content.appendChild(floorRow)
+  }
+
+  // 窗户编辑面板
+  function createWindowEditor(selWin) {
+    var editor = el('div', 'ph-item-editor')
+    var preset = WINDOW_PRESETS[selWin.styleIdx] || WINDOW_PRESETS[0]
+
+    var header = el('div', 'ph-editor-header')
+    header.appendChild(el('span', 'title', { text: '窗户 · ' + preset.name }))
+    var actions = el('div', 'ph-editor-actions')
+    var delBtn = el('button', 'del', { text: '删除' })
+    delBtn.onclick = function () { deleteSelectedWindow() }
+    actions.appendChild(delBtn)
+    header.appendChild(actions)
+    editor.appendChild(header)
+
+    // 样式切换行
+    var styleRow = el('div', '', { style: 'display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;' })
+    WINDOW_PRESETS.forEach(function (wp, idx) {
+      var swatch = el('button', 'ph-preset-swatch')
+      swatch.style.background = wp.bg
+      swatch.style.border = '3px solid ' + wp.frame
+      swatch.style.width = '44px'
+      swatch.style.height = '52px'
+      swatch.style.flexShrink = '0'
+      swatch.title = wp.name
+      if (idx === selWin.styleIdx) {
+        swatch.style.outline = '2px solid #6366f1'
+        swatch.style.outlineOffset = '2px'
+      }
+      swatch.onclick = function () {
+        state.windows = state.windows.map(function (w) {
+          if (w.id === selWin.id) return Object.assign({}, w, { styleIdx: idx })
+          return w
+        })
+        saveRoomData()
+        renderRoomPage()
+        if (rocheApi) rocheApi.ui.toast('窗户样式：' + wp.name)
+      }
+      styleRow.appendChild(swatch)
+    })
+    editor.appendChild(styleRow)
+
+    editor.appendChild(el('p', '', { text: '拖动窗户可移动位置，点击样式可切换外观', style: 'font-size:9px;color:#cbd5e1;text-align:center;' }))
+    return editor
+  }
+
+  function addWindow() {
+    addWindowWithStyle(0)
+  }
+
+  function addWindowWithStyle(styleIdx) {
+    var newWin = {
+      id: 'win-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      styleIdx: styleIdx,
+      x: 20 + Math.random() * 50,
+      y: 6,
+    }
+    state.windows.push(newWin)
+    state.selectedWindowId = newWin.id
+    saveRoomData()
+    renderRoomPage()
+    if (rocheApi) rocheApi.ui.toast('已添加窗户')
+  }
+
+  function deleteSelectedWindow() {
+    if (!state.selectedWindowId) return
+    state.windows = state.windows.filter(function (w) { return w.id !== state.selectedWindowId })
+    state.selectedWindowId = null
+    saveRoomData()
+    renderRoomPage()
+    if (rocheApi) rocheApi.ui.toast('窗户已删除')
   }
 
   function createQuickBtn(bgColor, icon, label, textColor) {
@@ -2217,7 +2509,7 @@
     window.RochePlugin.register({
       id: 'pixel-house',
       name: '像素小屋',
-      version: '4.0.0',
+      version: '4.1.0',
       apps: [
         {
           id: 'pixel-house-home',
